@@ -14,6 +14,7 @@ resvg = "0.48.1"
 rhodopsin-xlsx = { path = "crates/xlsx", version = "0.1.0" }
 roxmltree = "0.21"
 imagesize = "0.15"
+miniz_oxide = "0.8"
 png = "0.18"
 skrifa = "0.44"
 serde = { version = "1", features = ["derive"] }
