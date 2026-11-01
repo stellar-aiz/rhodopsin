@@ -510,7 +510,18 @@ fn render_slide(
             };
         } else if let Some(reference) = child(node, P, "bgRef") {
             // `idx` 1001 and above select `bgFillStyleLst`; the reference supplies `phClr`.
-            background = theme.fill_reference(reference, &mut warnings);
+            if let Some(xml) = theme.fill_reference_xml(reference, &mut warnings) {
+                let fill = Document::parse(&xml).context("Invalid theme fill")?;
+                background = paint(
+                    fill.root_element(),
+                    "#ffffff",
+                    &theme,
+                    (width, height),
+                    false,
+                    &mut background_defs,
+                    &mut warnings,
+                );
+            }
         }
         if background == "none" {
             background = "#ffffff".into();
@@ -646,6 +657,10 @@ fn render_shape(
     } else {
         1
     };
+    // The shape style (`p:style`) supplies theme defaults for the fill, line, effects, and
+    // text; explicit properties anywhere in the inheritance chain win over it.
+    let style_node = shape.chain.iter().find_map(|n| child(*n, P, "style"));
+    let style_ref = |tag: &str| style_node.and_then(|n| child(n, A, tag));
     let text_mirrored = (fx != fy) != shape.mirrored;
     if let Some(body) = child(node, P, "txBody") {
         // Measure within the shape's text area. Height changes may also change its width,
@@ -677,6 +692,8 @@ fn render_shape(
                         .collect(),
                     master_style: shape.master_style,
                     cell_props: None,
+                    style_ref: style_ref("fontRef")
+                        .map(|r| text::StyleRef::from_font_reference(r, theme, warnings)),
                 },
                 rect.2,
                 rect.3,
@@ -755,28 +772,25 @@ fn render_shape(
             );
         }
     }
-    let style_node = shape.chain.iter().find_map(|n| child(*n, P, "style"));
-    if style_node.is_some_and(|n| {
-        n.children()
-            .any(|c| c.is_element() && !matches!(c.tag_name().name(), "fillRef" | "lnRef"))
-    }) {
-        warn(
-            warnings,
-            "Theme effect and text style references are unsupported",
-        );
-    }
-    let effect_count = props_chain
-        .iter()
-        .find_map(|n| child(*n, A, "effectLst"))
-        .map(|n| {
-            effects::begin(
-                n,
-                (w, h, rotation, fx as f64, fy as f64),
-                theme,
-                svg,
-                warnings,
-            )
+    let geometry = (w, h, rotation, fx as f64, fy as f64);
+    let own_effects = props_chain.iter().find_map(|n| child(*n, A, "effectLst"));
+    let theme_effects = if own_effects.is_none() {
+        style_ref("effectRef").and_then(|r| theme.effect_reference_xml(r, warnings))
+    } else {
+        None
+    };
+    let theme_effects = theme_effects
+        .as_deref()
+        .map(Document::parse)
+        .transpose()
+        .context("Invalid theme effect style")?;
+    let effect_count = own_effects
+        .or_else(|| {
+            theme_effects
+                .as_ref()
+                .and_then(|d| child(d.root_element(), A, "effectLst"))
         })
+        .map(|n| effects::begin(n, geometry, theme, svg, warnings))
         .unwrap_or(0);
     if node.has_tag_name((P, "pic")) {
         render_image(node, parts, rels, theme, (w, h), svg, warnings)?;
@@ -804,8 +818,19 @@ fn render_shape(
                 }
                 None => "none".into(),
             }
-        } else if let Some(reference) = style_node.and_then(|n| child(n, A, "fillRef")) {
-            theme.fill_reference(reference, warnings)
+        } else if let Some(xml) =
+            style_ref("fillRef").and_then(|r| theme.fill_reference_xml(r, warnings))
+        {
+            let fill = Document::parse(&xml).context("Invalid theme fill")?;
+            paint(
+                fill.root_element(),
+                "none",
+                theme,
+                (w, h),
+                rotation != 0.0,
+                svg,
+                warnings,
+            )
         } else {
             "none".into()
         };
@@ -813,12 +838,7 @@ fn render_shape(
             .iter()
             .filter_map(|n| child(*n, A, "ln"))
             .collect();
-        let resolved_line = lines::resolve(
-            &direct_lines,
-            style_node.and_then(|n| child(n, A, "lnRef")),
-            theme,
-            warnings,
-        );
+        let resolved_line = lines::resolve(&direct_lines, style_ref("lnRef"), theme, warnings);
         let line_doc = resolved_line.as_deref().map(Document::parse).transpose()?;
         let line = line_doc
             .as_ref()

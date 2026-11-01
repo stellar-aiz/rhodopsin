@@ -92,29 +92,53 @@ fn face(nodes: &[Node<'_, '_>], kind: &str) -> Option<String> {
             .map(str::to_owned)
     })
 }
+fn first_fill<'a, 'i>(nodes: &[Node<'a, 'i>]) -> Option<Node<'a, 'i>> {
+    nodes.iter().find_map(|n| child(*n, A, "solidFill"))
+}
+/// Resolve a run's style. `nodes` are the run's own and shape-level properties, most specific
+/// first; `fallback` are the master and presentation defaults. A shape style's `a:fontRef`
+/// (`reference`) sits between them: PowerPoint shows its colour on a default shape even though
+/// the master's `otherStyle` names the text colour.
 fn style(
     nodes: &[Node<'_, '_>],
+    fallback: &[Node<'_, '_>],
     east_asian: bool,
     theme: &Theme,
+    reference: Option<&StyleRef>,
     warnings: &mut Warnings,
 ) -> Style {
-    let latin = face(nodes, "latin").unwrap_or_else(|| "sans-serif".into());
+    let all: Vec<Node<'_, '_>> = nodes.iter().chain(fallback).copied().collect();
+    // The shape style's theme font is the default face; its East Asian face only when the
+    // theme declares one, so an empty `ea` typeface does not produce a diagnostic per run.
+    let theme_face = |script: &str| {
+        reference
+            .and_then(|r| r.font)
+            .map(|prefix| format!("{prefix}-{script}"))
+            .filter(|key| theme.has_font(key))
+    };
+    let latin = face(nodes, "latin")
+        .or_else(|| theme_face("lt"))
+        .or_else(|| face(fallback, "latin"))
+        .unwrap_or_else(|| "sans-serif".into());
     let requested = if east_asian {
-        face(nodes, "ea").unwrap_or(latin)
+        face(nodes, "ea")
+            .or_else(|| theme_face("ea"))
+            .or_else(|| face(fallback, "ea"))
+            .unwrap_or(latin)
     } else {
         latin
     };
     Style {
         face: theme.font(&requested, warnings),
-        size: prop_number(nodes, "sz", 1800.0).clamp(100.0, 40000.0) / 75.0,
-        color: nodes
-            .iter()
-            .find_map(|n| child(*n, A, "solidFill"))
+        size: prop_number(&all, "sz", 1800.0).clamp(100.0, 40000.0) / 75.0,
+        color: first_fill(nodes)
             .map(|n| color(n, "#000000", theme, warnings))
+            .or_else(|| reference.and_then(|r| r.color.clone()))
+            .or_else(|| first_fill(fallback).map(|n| color(n, "#000000", theme, warnings)))
             .unwrap_or_else(|| "#000000".into()),
-        bold: matches!(attr(nodes, "b"), Some("1" | "true")),
-        italic: matches!(attr(nodes, "i"), Some("1" | "true")),
-        spacing: prop_number(nodes, "spc", 0.0).clamp(-400000.0, 400000.0) / 75.0,
+        bold: matches!(attr(&all, "b"), Some("1" | "true")),
+        italic: matches!(attr(&all, "i"), Some("1" | "true")),
+        spacing: prop_number(&all, "spc", 0.0).clamp(-400000.0, 400000.0) / 75.0,
     }
 }
 fn is_east_asian(ch: char) -> bool {
@@ -478,6 +502,8 @@ pub(super) struct TextBody<'a> {
     pub inherited: Vec<Node<'a, 'a>>,
     pub master_style: Option<Node<'a, 'a>>,
     pub cell_props: Option<Node<'a, 'a>>,
+    /// Defaults from the shape style's `a:fontRef`, used only where nothing else sets them.
+    pub style_ref: Option<StyleRef>,
 }
 impl<'a> From<Node<'a, 'a>> for TextBody<'a> {
     fn from(body: Node<'a, 'a>) -> Self {
@@ -486,7 +512,40 @@ impl<'a> From<Node<'a, 'a>> for TextBody<'a> {
             inherited: vec![],
             master_style: None,
             cell_props: None,
+            style_ref: None,
         }
+    }
+}
+/// Text defaults a shape style's `a:fontRef` supplies: the colour it carries and the theme
+/// font family it selects (`+mn` or `+mj`).
+#[derive(Clone, Debug, Default)]
+pub(super) struct StyleRef {
+    pub color: Option<String>,
+    pub font: Option<&'static str>,
+}
+impl StyleRef {
+    pub(super) fn from_font_reference(
+        reference: Node<'_, '_>,
+        theme: &Theme,
+        warnings: &mut Warnings,
+    ) -> Self {
+        let font = match reference.attribute("idx") {
+            Some("minor") => Some("+mn"),
+            Some("major") => Some("+mj"),
+            Some("none") | None => None,
+            Some(other) => {
+                warn(
+                    warnings,
+                    format!("Unsupported theme font reference: {other}"),
+                );
+                None
+            }
+        };
+        let color = reference
+            .children()
+            .any(|n| n.is_element())
+            .then(|| color(reference, "#000000", theme, warnings));
+        Self { color, font }
     }
 }
 
@@ -662,11 +721,19 @@ fn layout(
         .filter_map(|n| child(*n, A, "bodyPr"))
         .collect();
     let autofit = auto_fit(&body_props, warnings);
-    let text_style = |nodes: &[Node<'_, '_>], east: bool, warnings: &mut Warnings| {
-        let mut style = style(nodes, east, theme, warnings);
-        style.size *= autofit.scale;
-        style
-    };
+    let text_style =
+        |nodes: &[Node<'_, '_>], fallback: &[Node<'_, '_>], east: bool, warnings: &mut Warnings| {
+            let mut style = style(
+                nodes,
+                fallback,
+                east,
+                theme,
+                source.style_ref.as_ref(),
+                warnings,
+            );
+            style.size *= autofit.scale;
+            style
+        };
     let margin = |key, cell_key, default| {
         source
             .cell_props
@@ -733,6 +800,9 @@ fn layout(
                 paragraph_props.extend(child(list, A, "defPPr"));
             }
         }
+        // Properties up to here belong to the shape; the master and presentation defaults
+        // below rank under a shape style's `a:fontRef`.
+        let shape_level = paragraph_props.len();
         if !textbox && let Some(style) = source.master_style.and_then(|n| child(n, P, style_kind)) {
             paragraph_props.extend(child(style, A, &level_tag));
             paragraph_props.extend(child(style, A, "defPPr"));
@@ -745,7 +815,11 @@ fn layout(
             .iter()
             .find_map(|n| theme::bool_attr(*n, "hangingPunct"))
             .unwrap_or_else(|| theme.hanging_punctuation(style_kind, level));
-        let defaults: Vec<_> = paragraph_props
+        let defaults: Vec<_> = paragraph_props[..shape_level]
+            .iter()
+            .filter_map(|n| child(*n, A, "defRPr"))
+            .collect();
+        let theme_defaults: Vec<_> = paragraph_props[shape_level..]
             .iter()
             .filter_map(|n| child(*n, A, "defRPr"))
             .collect();
@@ -765,6 +839,7 @@ fn layout(
                             .into_iter()
                             .chain(defaults.iter().copied())
                             .collect::<Vec<_>>(),
+                        &theme_defaults,
                         false,
                         warnings,
                     ),
@@ -792,7 +867,7 @@ fn layout(
                     if last.is_some_and(|v| v != east) {
                         all.extend(glyphs(
                             &segment,
-                            text_style(&nodes, last.unwrap(), warnings),
+                            text_style(&nodes, &theme_defaults, last.unwrap(), warnings),
                             resolver,
                             warnings,
                         ));
@@ -804,7 +879,7 @@ fn layout(
                 if !segment.is_empty() {
                     all.extend(glyphs(
                         &segment,
-                        text_style(&nodes, last.unwrap_or(false), warnings),
+                        text_style(&nodes, &theme_defaults, last.unwrap_or(false), warnings),
                         resolver,
                         warnings,
                     ));
@@ -829,6 +904,7 @@ fn layout(
                     .collect();
                 let marker_style = text_style(
                     &marker_nodes,
+                    &theme_defaults,
                     all.first().is_some_and(|g| is_east_asian(g.ch)),
                     warnings,
                 );
@@ -879,7 +955,7 @@ fn layout(
             .into_iter()
             .chain(defaults.iter().copied())
             .collect();
-        let empty_style = text_style(&end_defaults, false, warnings);
+        let empty_style = text_style(&end_defaults, &theme_defaults, false, warnings);
         let has_empty_line = all.is_empty()
             || all.first().is_some_and(|g| g.ch == '\n')
             || all.last().is_some_and(|g| g.ch == '\n')
@@ -1404,7 +1480,15 @@ mod tests {
             .filter(|n| n.is_element())
             .collect();
         let resolve = |nodes: &[Node<'_, '_>]| {
-            style(nodes, true, &Theme::default(), &mut Warnings::default()).spacing
+            style(
+                nodes,
+                &[],
+                true,
+                &Theme::default(),
+                None,
+                &mut Warnings::default(),
+            )
+            .spacing
         };
         assert_eq!(resolve(&[nodes[0]]), -8.0);
         assert_eq!(resolve(&[nodes[1], nodes[0]]), 0.0);
@@ -1566,8 +1650,10 @@ mod tests {
             .unwrap();
         let s = style(
             &[run, defaults],
+            &[],
             false,
             &Theme::default(),
+            None,
             &mut Warnings::default(),
         );
         assert_eq!(s.size, 16.0);
@@ -1593,6 +1679,7 @@ mod tests {
                 inherited: vec![],
                 master_style: child(doc.root_element(), P, "txStyles"),
                 cell_props: None,
+                style_ref: None,
             },
             100.0,
             90.0,
@@ -1696,6 +1783,7 @@ mod tests {
                 inherited: vec![bodies[1]],
                 master_style: None,
                 cell_props: None,
+                style_ref: None,
             },
             200.0,
             20.0,

@@ -371,6 +371,7 @@ impl<'d> Renderer<'_, 'd> {
                 inherited: vec![],
                 master_style: None,
                 cell_props: child(cell, A, "tcPr"),
+                style_ref: None,
             })
         }
         // Pass 2: measure cell text and grow rows to fit it. Measurement diagnostics are

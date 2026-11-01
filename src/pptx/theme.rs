@@ -6,6 +6,8 @@ pub(super) struct Theme {
     colors: HashMap<String, String>,
     source: Option<String>,
     line_styles: Vec<lines::Element>,
+    /// `a:effectLst` of each `a:effectStyle`, in table order (empty when the style has none).
+    effect_styles: Vec<lines::Element>,
     mapping: HashMap<String, String>,
     fonts: HashMap<String, String>,
     hanging: HashMap<String, [Option<bool>; 9]>,
@@ -126,6 +128,20 @@ impl Theme {
                     .collect()
             })
             .unwrap_or_default();
+        self.effect_styles = root
+            .descendants()
+            .find(|n| n.has_tag_name((A, "effectStyleLst")))
+            .map(|list| {
+                list.children()
+                    .filter(|n| n.has_tag_name((A, "effectStyle")))
+                    .map(|style| {
+                        child(style, A, "effectLst")
+                            .map(lines::Element::from)
+                            .unwrap_or_else(|| lines::Element::empty("effectLst"))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
         if let Some(scheme) = root
             .descendants()
             .find(|n| n.has_tag_name((A, "clrScheme")))
@@ -172,18 +188,35 @@ impl Theme {
             }
         }
     }
-    pub(super) fn fill_reference(
+    /// The colour element a style reference supplies for `phClr`, or black with a diagnostic.
+    fn reference_color(reference: Node<'_, '_>, warnings: &mut Warnings) -> lines::Element {
+        reference
+            .children()
+            .find(|n| n.is_element())
+            .map(lines::Element::from)
+            .unwrap_or_else(|| {
+                warn(
+                    warnings,
+                    "Theme style reference color is missing; using black",
+                );
+                lines::Element::rgb("000000")
+            })
+    }
+    /// The theme fill a `fillRef` or `bgRef` selects, as a `<root>` document holding the fill
+    /// element with the reference colour substituted for `phClr`, ready for `paint`. `None`
+    /// means no fill (index 0 or 1000) or an entry that could not be resolved (reported).
+    pub(super) fn fill_reference_xml(
         &self,
         reference: Node<'_, '_>,
         warnings: &mut Warnings,
-    ) -> String {
+    ) -> Option<String> {
         let index = number(reference, "idx", 0.0) as usize;
         if index == 0 || index == 1000 {
-            return "none".into();
+            return None;
         }
         let Some(source) = &self.source else {
             warn(warnings, "Cannot resolve theme fill: missing theme part");
-            return "none".into();
+            return None;
         };
         let doc = Document::parse(source).expect("previously parsed theme XML");
         let (list, position) = if index > 1000 {
@@ -196,19 +229,60 @@ impl Theme {
             .find(|n| n.has_tag_name((A, list)))
             .and_then(|n| n.children().filter(|n| n.is_element()).nth(position));
         match entry {
-            Some(n) if n.has_tag_name((A, "noFill")) => "none".into(),
-            Some(n) if n.has_tag_name((A, "solidFill")) => {
-                let placeholder = color(reference, "#000000", self, warnings);
-                colors::resolve(n, "none", self, Some(&placeholder), warnings)
+            Some(n)
+                if matches!(
+                    n.tag_name().name(),
+                    "noFill" | "solidFill" | "gradFill" | "pattFill"
+                ) =>
+            {
+                let mut fill = lines::Element::from(n);
+                fill.placeholder(&Self::reference_color(reference, warnings));
+                Some(format!("<root xmlns:a=\"{A}\">{}</root>", fill.xml()))
             }
-            _ => {
+            Some(n) => {
                 warn(
                     warnings,
-                    format!("Theme fill reference {index} is unresolved or not a solid fill"),
+                    format!(
+                        "Theme fill reference {index} is a {} fill, which is unsupported",
+                        n.tag_name().name()
+                    ),
                 );
-                "none".into()
+                None
+            }
+            None => {
+                warn(
+                    warnings,
+                    format!("Theme fill reference {index} is unresolved"),
+                );
+                None
             }
         }
+    }
+    /// The theme effect style an `effectRef` selects, as a `<root>` document holding its
+    /// `a:effectLst` with the reference colour substituted, or `None` for index 0, an empty
+    /// style, or an unresolved index (reported).
+    pub(super) fn effect_reference_xml(
+        &self,
+        reference: Node<'_, '_>,
+        warnings: &mut Warnings,
+    ) -> Option<String> {
+        let index = number(reference, "idx", 0.0) as usize;
+        if index == 0 {
+            return None;
+        }
+        let Some(style) = index.checked_sub(1).and_then(|i| self.effect_styles.get(i)) else {
+            warn(
+                warnings,
+                format!("Theme effect reference {index} is unresolved"),
+            );
+            return None;
+        };
+        if !style.has_children() {
+            return None;
+        }
+        let mut effects = style.clone();
+        effects.placeholder(&Self::reference_color(reference, warnings));
+        Some(format!("<root xmlns:a=\"{A}\">{}</root>", effects.xml()))
     }
     pub(super) fn font(&self, value: &str, warnings: &mut Warnings) -> String {
         if !value.starts_with('+') {

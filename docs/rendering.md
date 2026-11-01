@@ -46,6 +46,10 @@ Placeholders match by `idx` from slide to layout and by type from layout to mast
 
 Ordinary text boxes (`txBox=1`) use `presentation/defaultTextStyle`; placeholders inherit layout/master styles; text inside shapes uses `otherStyle`. Run, paragraph, and list values override defaults. Empty paragraphs use the size and font metrics in `endParaRPr`. Fixture: `examples/text-inheritance.pptx`.
 
+## Theme style references
+
+A shape style (`p:style`) supplies theme defaults that explicit properties anywhere in the inheritance chain override: `fillRef` selects a `fillStyleLst` entry (`bgFillStyleLst` for `bgRef` and indices above 1000), `lnRef` a `lnStyleLst` entry, `effectRef` an `effectStyleLst` entry, and `fontRef` a theme font with a text colour. The reference's colour replaces `phClr` in the entry, keeping the entry's colour transforms, and the result goes through the ordinary fill, line, effect, and text code, so gradient and pattern theme fills and theme shadows render like explicit ones. `fontRef` ranks above the master text styles and presentation defaults and below the shape's own run, paragraph, and list properties: PowerPoint shows a default shape's text in the style's `lt1` colour even though the master's `otherStyle` names `tx1`. Its theme font (`+mn`/`+mj`) is requested when no `latin` typeface is set; the theme's East Asian font only when the theme declares a non-empty one. Index 0 (and 1000 for fills) means none; an unresolved index, a `blipFill` theme entry, and effect styles other than outer shadows are reported. Fixture: `examples/theme-style.pptx` (`tests/visual/make_theme_style.py`), within the comparison thresholds against LibreOffice (MAE 0.008, 2.3% changed).
+
 ## Saved autofit
 
 `normAutofit/fontScale` (default 100%) applies to measurement, wrapping, and drawing of all runs. `lnSpcReduction` (default 0%) subtracts from percentage line spacing (120% - 20% = 100%); fixed-point line spacing is unchanged. Child `noAutofit` cancels inherited autofit. The renderer never searches for a new shrink ratio.
@@ -162,7 +166,7 @@ A chart frame (`a:graphicData` with the DrawingML chart URI) is drawn from the v
 
 ## Known limitations
 
-- Complete layout/master property and text-style inheritance; `themeOverride` and full theme style matrices (individual fill/line references have partial support).
+- Complete layout/master property and text-style inheritance; `themeOverride` parts; `blipFill` entries and 3-D effect styles in theme style tables.
 - Full Japanese line-breaking rules, punctuation compression, all hanging symbols, complex shaping/ligatures/kerning, and dynamic autofit ratio calculation.
 - Identical baselines and fallback behavior across all fonts and Office renderers.
 - Chart types other than those under [Charts](#charts), SmartArt, freeform path fill modes other than normal and none, and many presets.
