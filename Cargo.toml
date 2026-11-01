@@ -32,7 +32,7 @@ required-features = ["cli", "xlsx"]
 
 [dependencies]
 anyhow = "1"
-base64 = "0.22"
+base64 = "0.23"
 clap = { version = "4", features = ["derive"], optional = true }
 resvg = "0.48.1"
 roxmltree = "0.21"

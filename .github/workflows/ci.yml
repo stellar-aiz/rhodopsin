@@ -38,6 +38,8 @@ jobs:
           cargo fmt --check
           cargo clippy --workspace --locked --all-targets -- -D warnings
           cargo test --workspace --locked
+          # The generated docs stay warning-free.
+          RUSTDOCFLAGS='-D warnings' cargo doc --no-deps --locked
           # The library without the default spreadsheet feature and its dependencies.
           cargo build --lib --no-default-features --locked
       - name: Release PDF conversion checks

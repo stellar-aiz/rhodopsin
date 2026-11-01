@@ -14,7 +14,8 @@ rhodopsin <INPUT> [--format png|pdf] [--out PATH] [--width N] [...]
 
 Download a prebuilt binary from the [releases page](https://github.com/stellar-aiz/rhodopsin/releases)
 (pre-release, unsigned; see [installing from a release](docs/usage.md#install-from-a-release)),
-or install from this checkout with Rust and Cargo:
+or install from this checkout with Rust and Cargo (to call it from Rust instead, see the
+[library guide](docs/usage.md#rust-library)):
 
 ```sh
 cargo install --path . --locked
