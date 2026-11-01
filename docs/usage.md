@@ -186,7 +186,9 @@ family priority: Noto Sans CJK JP, Noto Sans JP, Yu Gothic, Hiragino Sans, Meiry
 Arial Unicode MS, Arial, then other families. Ties use PostScript name, family
 name, and collection face index. Coverage matters within a requested family too.
 Measurement and rendering use the same face; fallback can still change widths
-and line heights relative to the original font.
+relative to the original font. Text in a substituted family uses a 1.2 em natural
+line height instead of the substitute's own metrics; see
+[substituted fonts](rendering.md#substituted-fonts).
 
 ## CLI result documents
 

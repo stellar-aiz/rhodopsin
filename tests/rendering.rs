@@ -710,10 +710,12 @@ fn preset_autofit_bounds_degenerate_areas_and_keeps_final_diagnostics_once() {
         );
         assert!(records.iter().all(|d| d["object_id"] == "2"));
         if !limited {
-            // Even from zero height, expand to a 48px arrow accommodating 24px text.
+            // Even from zero height, expand to a 57.6px arrow accommodating 28.8px text
+            // (three lines of the substituted family at 1.2 em).
             let img = image(&out);
             assert_eq!(rgb(&img, 10, 25), (0, 255, 0));
-            assert_eq!(rgb(&img, 10, 47), (255, 255, 255));
+            assert_eq!(rgb(&img, 10, 51), (0, 255, 0));
+            assert_eq!(rgb(&img, 10, 55), (255, 255, 255));
             assert!(!records.iter().any(|d| d["code"] == "text_overflow"));
         }
     }

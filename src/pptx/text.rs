@@ -141,6 +141,18 @@ fn style(
         spacing: prop_number(&all, "spc", 0.0).clamp(-400000.0, 400000.0) / 75.0,
     }
 }
+/// PowerPoint's measured natural line height for substituted families, in em.
+/// See docs/rendering.md#substituted-fonts.
+const SUBSTITUTED_LINE_HEIGHT: f64 = 1.2;
+/// Ascent and descent for a substituted family: the fixed height split by the
+/// substitute's ascent:descent ratio.
+fn substituted_metrics(size: f64, ascent: f64, descent: f64) -> Option<(f64, f64)> {
+    (ascent > 0.0 && descent >= 0.0 && ascent.is_finite() && descent.is_finite()).then(|| {
+        let height = SUBSTITUTED_LINE_HEIGHT * size;
+        let ascent = height * ascent / (ascent + descent);
+        (ascent, height - ascent)
+    })
+}
 fn is_east_asian(ch: char) -> bool {
     matches!(ch as u32, 0x3000..=0x9fff | 0xf900..=0xfaff | 0xff00..=0xffef | 0x20000..=0x323af)
 }
@@ -159,11 +171,16 @@ fn glyphs(
 ) -> Vec<Glyph> {
     let fonts = resolver.database;
     let requested = style.face.clone();
-    let id = fonts
+    let internal = fonts
         .faces()
         .find(|f| format!("rhodopsin-face-{}", f.id) == style.face)
-        .map(|f| f.id)
+        .map(|f| f.id);
+    let id = internal
         .or_else(|| resolver.select(&style.face, value, style.bold, style.italic, warnings));
+    // A face of another family stands in for the requested one. Per-glyph fallback faces
+    // arrive as internal names and keep their own metrics.
+    let substituted =
+        internal.is_none() && id.is_some_and(|id| resolver.substitutes(id, &requested));
     if let Some(id) = id {
         style.face = format!("rhodopsin-face-{id}");
         if let Some(Some(result)) = fonts.with_face_data(id, |data, index| {
@@ -189,6 +206,10 @@ fn glyphs(
                     f64::from(-metrics.descent),
                     f64::from(metrics.leading.max(0.0)),
                 ));
+            let (ascent, descent, leading) = substituted
+                .then(|| substituted_metrics(style.size, ascent, descent))
+                .flatten()
+                .map_or((ascent, descent, leading), |(a, d)| (a, d, 0.0));
             let gm = font.glyph_metrics(Size::unscaled(), LocationRef::default());
             if metrics.units_per_em == 0 {
                 return None;
@@ -1259,6 +1280,44 @@ mod tests {
         // All spans have different styles: no character spacing, but span rounding accumulates.
         assert_eq!(strings(wrap(&glyphs, 96.0, true, false)), ["あい", "う"]);
         assert_eq!(strings(wrap(&glyphs, 96.04, true, false)), ["あいう"]);
+    }
+    #[test]
+    fn substituted_families_use_a_fixed_line_height_split_by_the_substitute_ratio() {
+        let mut fonts = Database::new();
+        fonts.load_font_data(include_bytes!("../../tests/fixtures/metrics.ttf").to_vec());
+        let same = HashMap::from([(
+            "Rhodopsin Metrics Test".to_string(),
+            "Rhodopsin Metrics Test".to_string(),
+        )]);
+        let mapped = HashMap::from([(
+            "Missing Family".to_string(),
+            "Rhodopsin Metrics Test".to_string(),
+        )]);
+        let none = HashMap::new();
+        // The fixture font's usWin cell is 0.8 em ascent and 0.2 em descent; a substitute
+        // keeps that 4:1 split of a 1.2 em line.
+        for (family, mapping, substituted) in [
+            ("Rhodopsin Metrics Test", &none, false),
+            ("Rhodopsin Metrics Test", &same, false),
+            ("Missing Family", &none, true),
+            ("Missing Family", &mapped, true),
+        ] {
+            let (ascent, descent) = if substituted {
+                (0.96, 0.24)
+            } else {
+                (0.8, 0.2)
+            };
+            let mut style = sample("あ")[0].style.clone();
+            style.face = family.into();
+            style.size = 24.0;
+            let mut warnings = Warnings::default();
+            let measured = glyphs("あA", style, &Resolver::new(&fonts, mapping), &mut warnings);
+            for glyph in measured {
+                assert!((glyph.ascent - ascent * 24.0).abs() < 1e-9, "{family}");
+                assert!((glyph.descent - descent * 24.0).abs() < 1e-9, "{family}");
+                assert_eq!(glyph.leading, 0.0);
+            }
+        }
     }
     #[test]
     fn font_units_preserve_proportions_at_fractional_sizes() {
