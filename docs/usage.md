@@ -114,7 +114,7 @@ rhodopsin book.xlsx --format pdf --out printed.pdf --font-file /path/to/font.ttf
 
 Font substitution for XLSX input is not exposed; the renderer's own font directory and fallback-family options were not carried over to the CLI.
 When the OS font search is enabled and the home or data directory environment variables point to relative paths, the conversion fails with `invalid_system_font_directory`.
-Only the `.xlsx` extension (case-insensitive) is routed to the spreadsheet renderer; other extensions are treated as PPTX.
+The `.xlsx`, `.xlsm`, and `.xls` extensions (case-insensitive) are routed to the spreadsheet renderer; other extensions are treated as PPTX. `.xlsm` and `.xls` are refused there with `INVALID_INPUT` and the reason `input_extension_not_xlsx` (macro-enabled and legacy workbooks are not converted), and a legacy or encrypted file renamed to `.xlsx` is refused with `encrypted_or_legacy_workbook`.
 
 Failures use the same YAML layout as PPTX input and never include cell contents, sheet names, or paths:
 

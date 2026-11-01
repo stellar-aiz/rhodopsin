@@ -113,7 +113,7 @@ fn main() {
             Format::Pdf => "pdf",
         })
     });
-    if cli_xlsx::is_xlsx(&args.input) {
+    if cli_xlsx::is_spreadsheet(&args.input) {
         if matches!(args.format, Format::Png) {
             eprint!("{}", cli_xlsx::unsupported_format());
             std::process::exit(2);
