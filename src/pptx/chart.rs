@@ -13,6 +13,10 @@ const MAX_SERIES: usize = 64;
 /// A 0.75 pt line in CSS pixels.
 const HAIRLINE_PX: f64 = 1.0;
 const MAX_POINTS: usize = 10_000;
+/// Longest text taken from the chart part for one name, category, or separator.
+const MAX_TEXT: usize = 255;
+/// Largest synthetic shape markup drawn for one chart.
+const MAX_MARKUP: usize = 16 * 1024 * 1024;
 /// Office's default accent cycle, used when the theme does not define an accent colour.
 const PALETTE: [&str; 6] = ["4472C4", "ED7D31", "A5A5A5", "FFC000", "5B9BD5", "70AD47"];
 const LAYOUT_NOTE: &str = "Chart layout is approximated: plot area, legend, and label positions follow rhodopsin rules, not Office's";
@@ -172,6 +176,14 @@ pub(super) fn render<'d>(
         renderer.warnings,
         &mut out,
     );
+    if out.xml.len() > MAX_MARKUP {
+        renderer.svg.push_str("</g>");
+        renderer.warnings.push(
+            Code::Omitted,
+            "Omitted chart: its drawing exceeds the size limit",
+        );
+        return Ok(());
+    }
     let xml = format!(
         "<p:spTree xmlns:p=\"{P}\" xmlns:a=\"{A}\">{}</p:spTree>",
         out.xml
@@ -287,7 +299,7 @@ fn model<'a>(root: Node<'a, 'a>, warnings: &mut Warnings) -> Result<Chart<'a>, S
                 tx.descendants()
                     .find(|n| n.has_tag_name((C, "v")))
                     .and_then(|n| n.text())
-                    .map(str::to_owned)
+                    .map(clip)
             })
             .unwrap_or_else(|| format!("Series{}", i + 1));
         let points = node
@@ -421,8 +433,8 @@ fn labels(node: Node<'_, '_>, warnings: &mut Warnings) -> Vec<String> {
             }
             result[idx] = child(pt, C, "v")
                 .and_then(|n| n.text())
-                .unwrap_or("")
-                .to_owned();
+                .map(clip)
+                .unwrap_or_default();
         }
         return result;
     }
@@ -463,7 +475,7 @@ fn number_text(value: f64, code: Option<&str>, warnings: &mut Warnings) -> Strin
     };
     let places = match decimals {
         None => 0,
-        Some(d) if !d.is_empty() && d.chars().all(|c| c == '0') => d.len(),
+        Some(d) if (1..=30).contains(&d.len()) && d.chars().all(|c| c == '0') => d.len(),
         Some(_) => {
             warnings.push(
                 Code::Approximation,
@@ -501,6 +513,10 @@ fn general(value: f64) -> String {
         text
     };
     if text == "-0" { "0".into() } else { text }
+}
+/// Text from the chart part, cut to `MAX_TEXT` characters so labels stay bounded.
+fn clip(text: &str) -> String {
+    text.chars().take(MAX_TEXT).collect()
 }
 fn group_thousands(text: &str) -> String {
     let (sign, rest) = text.strip_prefix('-').map_or(("", text), |r| ("-", r));
@@ -876,7 +892,9 @@ fn label_text(
     let separator = child(labels, C, "separator")
         .and_then(|n| n.text())
         .unwrap_or(", ")
-        .to_owned();
+        .chars()
+        .take(MAX_TEXT)
+        .collect::<String>();
     Some(parts.join(&separator))
 }
 
