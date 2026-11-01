@@ -83,6 +83,8 @@ impl<'d> Renderer<'_, 'd> {
                 "graphicFrame" => {
                     if let Some(ole) = ole_object(node) {
                         self.ole(node, ole)?;
+                    } else if let Some(id) = chart::reference(node) {
+                        chart::render(self, node, id, location, depth)?;
                     } else {
                         self.table(node, location)?;
                     }
@@ -502,7 +504,7 @@ impl<'d> Renderer<'_, 'd> {
     }
 }
 /// Open the transform group and return the extent and whether the transform mirrors.
-fn transform(t: Node<'_, '_>, svg: &mut String) -> Result<(f64, f64, bool)> {
+pub(super) fn transform(t: Node<'_, '_>, svg: &mut String) -> Result<(f64, f64, bool)> {
     let off = child(t, A, "off").context("Missing transform origin")?;
     let ext = child(t, A, "ext").context("Missing transform extent")?;
     let (x, y, w, h) = (

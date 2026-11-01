@@ -9,6 +9,7 @@ use std::{
     path::Path,
 };
 
+mod chart;
 mod colors;
 mod diagnostics;
 mod effects;

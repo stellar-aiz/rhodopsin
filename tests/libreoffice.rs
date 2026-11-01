@@ -13,6 +13,13 @@ fn composite_shapes_match_libreoffice() {
 
 #[test]
 #[ignore = "Requires LibreOffice and Python dependencies from tests/visual/requirements.txt"]
+fn line_chart_matches_libreoffice() {
+    // The bar and pie fixtures exceed the thresholds on automatic layout; see docs/rendering.md.
+    compare_fixture("chart-line");
+}
+
+#[test]
+#[ignore = "Requires LibreOffice and Python dependencies from tests/visual/requirements.txt"]
 fn geometry_matches_libreoffice() {
     compare_fixture("geometry");
 }
