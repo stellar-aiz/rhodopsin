@@ -918,34 +918,20 @@ dependencies = [
  "anyhow",
  "base64 0.22.1",
  "clap",
- "imagesize",
- "miniz_oxide 0.8.9",
- "png",
- "resvg",
- "rhodopsin-xlsx",
- "roxmltree 0.21.1",
- "serde",
- "serde_json",
- "skrifa",
- "tempfile",
- "zip",
- "zune-jpeg",
-]
-
-[[package]]
-name = "rhodopsin-xlsx"
-version = "0.1.0"
-dependencies = [
  "image",
+ "imagesize",
  "lopdf",
  "miniz_oxide 0.8.9",
  "pdf-writer",
+ "png",
+ "resvg",
  "roxmltree 0.21.1",
  "rustix",
  "rustybuzz",
  "serde",
  "serde_json",
  "sha2",
+ "skrifa",
  "subsetter",
  "tempfile",
  "unicode-bidi",
@@ -953,6 +939,7 @@ dependencies = [
  "unicode-linebreak",
  "unicode-script",
  "zip",
+ "zune-jpeg",
 ]
 
 [[package]]

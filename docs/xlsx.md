@@ -4,16 +4,16 @@ kind: guide
 
 # XLSX to PDF: design rules and readiness
 
-`crates/xlsx` holds `rhodopsin-xlsx`, the library that will render the printed pages of an `.xlsx` workbook to PDF. The root CLI routes `.xlsx` input to it (`rhodopsin book.xlsx --format pdf`, see [usage](usage.md#xlsx-input)); the crate has no binary of its own. The requirements it works toward are in [xlsx-requirements.md](xlsx-requirements.md), and the comparison method in [xlsx-validation.md](xlsx-validation.md).
+The `rhodopsin::xlsx` module (`src/xlsx/`, behind the default `xlsx` feature) will render the printed pages of an `.xlsx` workbook to PDF. The CLI routes `.xlsx` input to it (`rhodopsin book.xlsx --format pdf`, see [usage](usage.md#xlsx-input)). The requirements it works toward are in [xlsx-requirements.md](xlsx-requirements.md), and the comparison method in [xlsx-validation.md](xlsx-validation.md).
 
-**Status: no workbook is converted yet.** `convert_with_options` validates the package, workbook, styles, and fonts, then stops with `UNSUPPORTED_FEATURE` / `rendering_not_implemented` (`crates/xlsx/src/lib.rs`). Inputs that fail earlier report their own reason code. XLSX input therefore always behaves as `--strict`. The library's development API (`convert_with_policy`, `PreparedWorkbook::render_with_policy`, `render_with_cell_overflow`, `render_with_borders` in `crates/xlsx/src/render.rs`) renders a workbook when the caller supplies the layout policy that Excel decides for itself (content rectangles, line pitch, clip rules); that policy is what remains to be derived and verified.
+**Status: no workbook is converted yet.** `convert_with_options` validates the package, workbook, styles, and fonts, then stops with `UNSUPPORTED_FEATURE` / `rendering_not_implemented` (`src/xlsx/mod.rs`). Inputs that fail earlier report their own reason code. XLSX input therefore always behaves as `--strict`. The library's development API (`convert_with_policy`, `PreparedWorkbook::render_with_policy`, `render_with_cell_overflow`, `render_with_borders` in `src/xlsx/render.rs`) renders a workbook when the caller supplies the layout policy that Excel decides for itself (content rectangles, line pitch, clip rules); that policy is what remains to be derived and verified.
 
 ## Design rules
 
-These are the decisions that cannot be read from the code. Each is enforced by a reason code and fixed by tests under `crates/xlsx/tests/` (test names are Japanese).
+These are the decisions that cannot be read from the code. Each is enforced by a reason code and fixed by tests under `tests/xlsx_*.rs` (test names are Japanese).
 
 - **Stop, never approximate silently.** Anything the renderer cannot reproduce stops with a located reason instead of a guess: a missing glyph is not patched from another font, a locale is not inferred, a font family is not inferred from a file name. Per-element approximate rendering with warnings is planned but not implemented.
-- **Diagnostics carry position, count, and kind only.** No cell values, strings, formulas, sheet names, paths, or raw library errors reach a diagnostic (`crates/xlsx/src/diagnostic.rs`; the CLI adds a silent panic hook for the same reason, `src/cli_xlsx.rs`).
+- **Diagnostics carry position, count, and kind only.** No cell values, strings, formulas, sheet names, paths, or raw library errors reach a diagnostic (`src/xlsx/diagnostic.rs`; the CLI adds a silent panic hook for the same reason, `src/cli_xlsx.rs`).
 - **Formulas are never recalculated.** The stored cached value and its decimal lexeme are used; a missing cache stops with `formula_cached_value_missing`.
 - **Decimal arithmetic on stored lexemes.** Dates, times, exponents, fractions, and General candidates are computed from the decimal text, never through an `f64` round trip (`format/`, `text_layout.rs`).
 - **Number format resolution.** An explicit `formatCode` beats `numFmtId`. Built-in date/time ids 14-22 and 45-47 resolve only when the context declares en-US (14, 22, 47 follow the MS-OI29500 Excel differences); the Japanese ids 27-36 and 50-58 resolve only under a declared ja locale; otherwise the id is rejected rather than guessed. Ids 5-8, 23-26, 41-44, and 63-66 require the stored `formatCode`, else `locale_number_format_missing`.
@@ -31,7 +31,7 @@ These are the decisions that cannot be read from the code. Each is enforced by a
 
 ## Evidence
 
-Fixtures under `crates/xlsx/tests/fixtures/` and the workbooks built inside tests are synthetic; `tests/support/mod.rs` generates minimal sfnt fonts with empty outlines. These prove control flow (selection, measurement, rejection), not appearance. No Excel-generated reference workbook or PDF exists yet, so no claim of page-level agreement with Excel has been verified, and none should be stated. The probe generators `cargo run -p rhodopsin-xlsx --example make-fraction-probe|make-general-probe|make-underline-probe -- OUT.xlsx 'Font Name'` write deterministic observation workbooks for the three open measurement questions; they are inputs for an Excel observation, not fixtures.
+Fixtures under `tests/fixtures/xlsx/` and the workbooks built inside tests are synthetic; `tests/xlsx_support/mod.rs` generates minimal sfnt fonts with empty outlines. These prove control flow (selection, measurement, rejection), not appearance. No Excel-generated reference workbook or PDF exists yet, so no claim of page-level agreement with Excel has been verified, and none should be stated. The probe generators `cargo run -p rhodopsin-xlsx --example make-fraction-probe|make-general-probe|make-underline-probe -- OUT.xlsx 'Font Name'` write deterministic observation workbooks for the three open measurement questions; they are inputs for an Excel observation, not fixtures.
 
 ## Not finished
 
@@ -53,16 +53,16 @@ Fixtures under `crates/xlsx/tests/fixtures/` and the workbooks built inside test
 
 The CLI also differs from the requirements in two places that are tracked rather than hidden: `.xls` and `.xlsm` input falls through to the PPTX pipeline instead of a reasoned rejection ([#112](https://github.com/stellar-aiz/rhodopsin/issues/112); the library itself rejects them with `input_extension_not_xlsx` / `encrypted_or_legacy_workbook`), and font substitution (`fallback_family`) and font directories exist in `ConversionOptions` but are not exposed by the CLI.
 
-## Working on the crate
+## Working on the spreadsheet module
 
 ```sh
-cargo test --locked -p rhodopsin-xlsx
+cargo test --locked xlsx
 cargo test --locked --test xlsx_cli
-cargo clippy --workspace --locked --all-targets -- -D warnings
-python3 -m unittest discover -s crates/xlsx/tools -p 'test_*.py'
+cargo clippy --locked --all-targets -- -D warnings
+python3 -m unittest discover -s tools -p 'test_*.py'
 ```
 
-`cargo run --example` and `cargo test --example` need `-p rhodopsin-xlsx`; the workspace `target/` is at the repository root. Primary sources consulted for the rules above; none of them substitutes for a comparison with Excel output:
+The spreadsheet integration tests are `tests/xlsx_*.rs` and its development probes are the `examples/xlsx-*.rs` examples. Primary sources consulted for the rules above; none of them substitutes for a comparison with Excel output:
 
 - [NumberingFormat](https://learn.microsoft.com/en-us/dotnet/api/documentformat.openxml.spreadsheet.numberingformat?view=openxml-2.8.1) and [Excel's built-in format differences (MS-OI29500)](https://learn.microsoft.com/en-us/openspecs/office_standards/ms-oi29500/17d11129-219b-4e2c-88db-45844d21e528)
 - [Excel date systems](https://support.microsoft.com/en-us/excel/date-systems-in-excel) and [Japanese era boundaries](https://learn.microsoft.com/ja-jp/dotnet/api/system.globalization.japanesecalendar.getera?view=netframework-4.8.1)

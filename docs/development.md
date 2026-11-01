@@ -6,7 +6,7 @@ kind: guide
 
 ## Architecture
 
-The workspace has two crates. The root package `rhodopsin` converts PPTX; `crates/xlsx` holds `rhodopsin-xlsx`, the spreadsheet library ([XLSX](xlsx.md)).
+One crate, `rhodopsin`, converts PPTX and (behind the default `xlsx` feature) XLSX; the spreadsheet code is the `src/xlsx/` module ([XLSX](xlsx.md), [record](history/20261101_xlsx-single-crate.md)). `cargo build --lib --no-default-features` builds the library without the spreadsheet dependencies.
 
 ```text
 PPTX (ZIP/XML)
@@ -29,9 +29,9 @@ cargo clippy --workspace --locked --all-targets -- -D warnings
 cargo test --workspace --locked
 ```
 
-Without `--workspace`, `cargo test` and `cargo clippy` cover the root package only and skip the xlsx crate. Tests use ZIP/XML inputs, PNG pixels, and generated fonts to check slide order, images, output protection, malformed archives, strict mode, inheritance, font selection, layout, and diagnostics. `examples/basic.pptx` and the other `examples/*.pptx` are synthetic. Generated rectangle fonts (`tests/fixtures/metrics.ttf`, `crates/xlsx/tests/support/`) are structural fixtures, not evidence of glyph fidelity. No Office or Python runtime is needed for ordinary Rust tests.
+Tests use ZIP/XML inputs, PNG pixels, and generated fonts to check slide order, images, output protection, malformed archives, strict mode, inheritance, font selection, layout, and diagnostics. `examples/basic.pptx` and the other `examples/*.pptx` are synthetic. Generated rectangle fonts (`tests/fixtures/metrics.ttf`, `tests/xlsx_support/`) are structural fixtures, not evidence of glyph fidelity. No Office or Python runtime is needed for ordinary Rust tests.
 
-CI (`.github/workflows/ci.yml`) runs on ubuntu-24.04, macos-15, and windows-2025 with a pinned Rust 1.97.0 toolchain: the three commands above, a release build with `cargo test --release --locked --test pdf`, and the Python unit tests in `tests/visual` and `crates/xlsx/tools`. It runs once per change: on pull requests and on pushes to `main`, skipping Markdown-only changes; a new push to a pull-request branch cancels the superseded run, and runs on `main` are never cancelled. Cargo and pip dependencies are cached. The scheduled/manual visual workflow (`.github/workflows/visual.yml`, Sundays and `workflow_dispatch`) uses LibreOffice 26.2.5.2 with a verified download SHA-256 and checks the Hiragino Sans W3/W6 hashes before comparing; host OS images are labels, not pins, so environment information is retained in reports. Do not compensate for environment differences by relaxing thresholds.
+CI (`.github/workflows/ci.yml`) runs on ubuntu-24.04, macos-15, and windows-2025 with a pinned Rust 1.97.0 toolchain: the three commands above, a release build with `cargo test --release --locked --test pdf`, and the Python unit tests in `tests/visual` and `tools`. It runs once per change: on pull requests and on pushes to `main`, skipping Markdown-only changes; a new push to a pull-request branch cancels the superseded run, and runs on `main` are never cancelled. Cargo and pip dependencies are cached. The scheduled/manual visual workflow (`.github/workflows/visual.yml`, Sundays and `workflow_dispatch`) uses LibreOffice 26.2.5.2 with a verified download SHA-256 and checks the Hiragino Sans W3/W6 hashes before comparing; host OS images are labels, not pins, so environment information is retained in reports. Do not compensate for environment differences by relaxing thresholds.
 
 ## Visual comparisons
 
@@ -57,17 +57,14 @@ cargo build --release --locked
 
 Artifacts: input PPTX, commands, stdout/stderr, `actual/`, `reference/` (PDF and PNG), `diff/` (red differences on black), and `report.json`; failures retain evidence, and each run needs a new output directory. Default thresholds: normalized RGB MAE <= 0.02 and changed-pixel ratio <= 0.05, where a changed pixel differs in any channel by more than 16; default width 1200 px. Only a 1 px rasterization-rounding discrepancy is corrected; page-count and aspect-ratio mismatches fail. Exit codes: 0 within thresholds, 1 exceeded, 2 execution error. Threshold overrides are recorded in the report and never used to hide a mismatch. Regions, font pinning, the per-OS CI legs, and every fixture generator are described in the [visual comparison guide](visual-comparison.md). LibreOffice can differ from PowerPoint too; passing thresholds is not proof of display compatibility, and same-font PowerPoint reference comparisons remain future work.
 
-## Spreadsheet crate
+## Spreadsheet module
 
-`crates/xlsx` was imported from the former xlsx2pdf repository as a snapshot without history ([record](history/20261022_xlsx-import.md)). It has no binary; the root CLI routes `.xlsx` input to it, and its state, design rules, and open items are in [xlsx.md](xlsx.md). Run its checks from the repository root:
+`src/xlsx/` was imported from the former xlsx2pdf repository as a snapshot without history ([record](history/20261022_xlsx-import.md)) and later merged into this crate ([record](history/20261101_xlsx-single-crate.md)). The CLI routes `.xlsx` input to it; its state, design rules, and open items are in [xlsx.md](xlsx.md). Its tests are `tests/xlsx_*.rs`, its probes and comparators the `examples/xlsx-*.rs` examples, and its Python tools (SBOM/NOTICE, distribution bundle, document comparison) are in `tools/`:
 
 ```sh
-cargo test --locked -p rhodopsin-xlsx
 cargo test --locked --test xlsx_cli
-python3 -m unittest discover -s crates/xlsx/tools -p 'test_*.py'
+python3 -m unittest discover -s tools -p 'test_*.py'
 ```
-
-`cargo run --example` for its probes and comparators needs `-p rhodopsin-xlsx`.
 
 ## Implementation references
 

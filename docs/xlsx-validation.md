@@ -27,16 +27,16 @@ Items checked: page count and size, first and last cell of each page (repeated r
 
 ## Tools
 
-The tools live in `crates/xlsx` and read existing PDFs or PNGs; none of them rasterizes a PDF, produces a verdict, or is a runtime dependency. Run cargo commands from the repository root with `-p rhodopsin-xlsx`; the workspace `target/` directory is at the root. None of the tools copies file paths, PDF strings, or child-process stderr into its output.
+The tools are the `examples/xlsx-*.rs` examples and `tools/compare-document.py`; they read existing PDFs or PNGs, and none of them rasterizes a PDF, produces a verdict, or is a runtime dependency. None of the tools copies file paths, PDF strings, or child-process stderr into its output.
 
 ```sh
-cargo build --locked -p rhodopsin-xlsx --example compare-pages --example compare-rasters --example check-reference
-target/debug/examples/compare-pages excel.pdf rhodopsin.pdf libreoffice.pdf > comparison.json
-target/debug/examples/compare-rasters excel.png rhodopsin.png libreoffice.png --diff-dir raster-differences > raster-comparison.json
-target/debug/examples/check-reference path/to/fixture/reference.json
-python3 crates/xlsx/tools/compare-document.py comparison-input.json \
-  --pdf-comparator target/debug/examples/compare-pages \
-  --raster-comparator target/debug/examples/compare-rasters \
+cargo build --locked --example xlsx-compare-pages --example xlsx-compare-rasters --example xlsx-check-reference
+target/debug/examples/xlsx-compare-pages excel.pdf rhodopsin.pdf libreoffice.pdf > comparison.json
+target/debug/examples/xlsx-compare-rasters excel.png rhodopsin.png libreoffice.png --diff-dir raster-differences > raster-comparison.json
+target/debug/examples/xlsx-check-reference path/to/fixture/reference.json
+python3 tools/compare-document.py comparison-input.json \
+  --pdf-comparator target/debug/examples/xlsx-compare-pages \
+  --raster-comparator target/debug/examples/xlsx-compare-rasters \
   --out-dir target/comparison
 ```
 

@@ -2,16 +2,37 @@
 name = "rhodopsin"
 version = "0.2.0"
 edition = "2024"
-description = "CLI and Rust library for converting PPTX to PNG or PDF without Office (early implementation)"
+description = "CLI and Rust library for converting PPTX to PNG or PDF, and XLSX to PDF, without Office (early implementation)"
 license = "MIT"
 repository = "https://github.com/stellar-aiz/rhodopsin"
+
+[features]
+default = ["xlsx"]
+# Spreadsheet (.xlsx) to PDF: `rhodopsin::xlsx` and the CLI's .xlsx route. PPTX-only library
+# users can disable default features to leave its dependencies out.
+xlsx = [
+    "dep:image",
+    "dep:pdf-writer",
+    "dep:rustix",
+    "dep:rustybuzz",
+    "dep:subsetter",
+    "dep:tempfile",
+    "dep:unicode-bidi",
+    "dep:unicode-bidi-mirroring",
+    "dep:unicode-linebreak",
+    "dep:unicode-script",
+]
+
+[[bin]]
+name = "rhodopsin"
+path = "src/main.rs"
+required-features = ["xlsx"]
 
 [dependencies]
 anyhow = "1"
 base64 = "0.22"
 clap = { version = "4", features = ["derive"] }
 resvg = "0.48.1"
-rhodopsin-xlsx = { path = "crates/xlsx", version = "0.1.0" }
 roxmltree = "0.21"
 imagesize = "0.15"
 miniz_oxide = "0.8"
@@ -21,9 +42,25 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 zune-jpeg = "0.5.9"
 zip = { version = "2.4", default-features = false, features = ["deflate"] }
+# Used by the xlsx feature.
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"], optional = true }
+pdf-writer = { version = "0.15", optional = true }
+rustybuzz = { version = "0.20", optional = true }
+subsetter = { version = "0.2.6", default-features = false, optional = true }
+tempfile = { version = "3", optional = true }
+unicode-bidi = { version = "0.3.18", optional = true }
+unicode-bidi-mirroring = { version = "0.4.0", optional = true }
+unicode-linebreak = { version = "0.1.5", optional = true }
+unicode-script = { version = "0.5.8", optional = true }
+
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1", features = ["fs"], optional = true }
 
 [dev-dependencies]
+lopdf = { version = "0.38", default-features = false }
+sha2 = "0.10"
 tempfile = "3"
 
+# A single-package workspace: keeps `cargo` from adopting a parent manifest (for example in a
+# `.worktrees/` checkout under another clone).
 [workspace]
-members = ["crates/xlsx"]
