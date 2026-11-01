@@ -83,7 +83,7 @@ impl Font {
             .filter_map(|kind| {
                 child(props, A, kind)
                     .and_then(|n| n.attribute("typeface"))
-                    .map(|face| format!("<a:{kind} typeface=\"{}\"/>", escape(face)))
+                    .map(|face| format!("<a:{kind} typeface=\"{}\"/>", escape(&clip(face))))
             })
             .collect();
         if !faces.is_empty() {
@@ -164,6 +164,7 @@ pub(super) fn render<'d>(
     let name = identity.and_then(|n| n.attribute("name")).unwrap_or("");
     let mut out = Shapes {
         xml: String::new(),
+        overflow: false,
         id: escape(id_attr),
         name: escape(name),
     };
@@ -176,7 +177,7 @@ pub(super) fn render<'d>(
         renderer.warnings,
         &mut out,
     );
-    if out.xml.len() > MAX_MARKUP {
+    if out.overflow {
         renderer.svg.push_str("</g>");
         renderer.warnings.push(
             Code::Omitted,
@@ -539,6 +540,8 @@ fn group_thousands(text: &str) -> String {
 /// Synthetic DrawingML shapes in frame coordinates (CSS pixels).
 struct Shapes {
     xml: String,
+    /// Set once the markup reaches `MAX_MARKUP`; nothing more is appended after that.
+    overflow: bool,
     id: String,
     name: String,
 }
@@ -571,6 +574,11 @@ fn line_xml(color: Option<&str>, width_px: f64) -> String {
 }
 #[allow(clippy::too_many_arguments)]
 impl Shapes {
+    /// Whether the markup limit is reached; records the overflow for `render`.
+    fn full(&mut self) -> bool {
+        self.overflow |= self.xml.len() > MAX_MARKUP;
+        self.overflow
+    }
     fn open(&mut self, x: f64, y: f64, w: f64, h: f64) {
         self.xml.push_str(&format!(
             "<p:sp><p:nvSpPr><p:cNvPr id=\"{}\" name=\"{}\"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr><p:spPr><a:xfrm><a:off x=\"{}\" y=\"{}\"/><a:ext cx=\"{}\" cy=\"{}\"/></a:xfrm>",
@@ -593,6 +601,9 @@ impl Shapes {
         line: Option<&str>,
         line_px: f64,
     ) {
+        if self.full() {
+            return;
+        }
         self.open(x, y, w, h);
         self.xml.push_str(&format!(
             "<a:prstGeom prst=\"{prst}\"><a:avLst/></a:prstGeom>{}{}</p:spPr></p:sp>",
@@ -609,6 +620,9 @@ impl Shapes {
         line: Option<&str>,
         line_px: f64,
     ) {
+        if self.full() {
+            return;
+        }
         if points.len() < 2 {
             return;
         }
@@ -653,6 +667,9 @@ impl Shapes {
         line: Option<&str>,
         line_px: f64,
     ) {
+        if self.full() {
+            return;
+        }
         self.open(cx - r, cy - r, 2.0 * r, 2.0 * r);
         let size = emu(2.0 * r);
         let (sx, sy) = (
@@ -697,6 +714,9 @@ impl Shapes {
         align: &str,
         anchor: &str,
     ) {
+        if self.full() {
+            return;
+        }
         if text.is_empty() {
             return;
         }
@@ -948,7 +968,7 @@ fn draw(
                     .collect()
             })
             .collect();
-        let rich = rich.join("\n");
+        let rich = clip(&rich.join("\n"));
         if !rich.trim().is_empty() {
             rich
         } else if let Some(v) = t
@@ -956,7 +976,7 @@ fn draw(
             .find(|n| n.has_tag_name((C, "v")))
             .and_then(|n| n.text())
         {
-            v.to_owned()
+            clip(v)
         } else if chart.series.len() == 1 {
             chart.series[0].name.clone()
         } else {
