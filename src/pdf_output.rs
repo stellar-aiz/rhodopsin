@@ -78,16 +78,51 @@ fn convert_inner(
     for (index, slide) in deck.slides.iter().enumerate() {
         let tree = resvg::usvg::Tree::from_str(&slide.svg, &options)
             .with_context(|| format!("Cannot parse slide {}", slide.number))?;
-        writer
+        let notes = writer
             .page(&tree)
             .with_context(|| format!("PDF slide {}", slide.number))?;
+        let mut warnings = slide.warnings.clone();
+        let mut diagnostics = slide.diagnostics.clone();
+        // What only a raster could show in PDF is reported like any other approximation.
+        for (code, message, location) in notes {
+            if !warnings.contains(&message) {
+                warnings.push(message.clone());
+            }
+            diagnostics.push(Diagnostic {
+                code,
+                part: slide.part.clone(),
+                object_id: None,
+                object_name: None,
+                location: format!("pdf/{location}"),
+                message,
+                font: None,
+                required_font: None,
+                missing_character: None,
+            });
+        }
         slides.push(PdfSlideReport {
             slide: slide.number,
             page: index + 1,
             hidden: slide.hidden,
-            warnings: slide.warnings.clone(),
-            diagnostics: slide.diagnostics.clone(),
+            warnings,
+            diagnostics,
         });
+    }
+    // Strict mode already stopped on rendering diagnostics; PDF rasters add their own.
+    if settings.strict && slides.iter().any(|s| !s.warnings.is_empty()) {
+        return Err(crate::StrictModeError {
+            slides: slides
+                .iter()
+                .map(|s| crate::SlideReport {
+                    slide: s.slide,
+                    hidden: s.hidden,
+                    image: out.display().to_string(),
+                    warnings: s.warnings.clone(),
+                    diagnostics: s.diagnostics.clone(),
+                })
+                .collect(),
+        }
+        .into());
     }
     let report = PdfConversionReport {
         schema_version: 1,

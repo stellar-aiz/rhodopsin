@@ -119,26 +119,77 @@ fn cli_defaults_to_one_file_reports_diagnostics_and_refuses_overwrite() {
     assert!(String::from_utf8_lossy(&again.stderr).contains("created: false"));
     assert_eq!(fs::read(out).unwrap(), original);
 }
-#[test]
-fn unsupported_paint_and_strict_mode_leave_no_pdf_or_temporary_file() {
+/// Convert a fixture whose shape properties contain `props` and return the PDF text and the
+/// per-slide warnings.
+fn pdf_of(props: &str) -> (String, Vec<String>) {
     let dir = tempfile::tempdir().unwrap();
     let input = dir.path().join("input.pptx");
-    let gradient = r#"<a:gradFill><a:gsLst><a:gs pos="0"><a:srgbClr val="FF0000"/></a:gs><a:gs pos="100000"><a:srgbClr val="0000FF"/></a:gs></a:gsLst><a:lin ang="0" scaled="1"/></a:gradFill>"#;
-    fixture(&input, gradient, false);
+    fixture(&input, props, false);
     let out = dir.path().join("out.pdf");
-    let failure = run(&input, Some(&out));
-    assert_eq!(failure.status.code(), Some(1));
-    let error = String::from_utf8_lossy(&failure.stderr);
-    assert!(error.contains("PDF slide 1"));
-    assert!(error.contains("Gradient/pattern"));
-    assert!(!out.exists());
-    assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1);
+    let report = convert_pdf(&input, &out, &options()).unwrap();
+    let warnings = report
+        .slides
+        .iter()
+        .flat_map(|s| s.warnings.clone())
+        .collect();
+    (
+        String::from_utf8_lossy(&fs::read(&out).unwrap()).into_owned(),
+        warnings,
+    )
+}
+#[test]
+fn gradients_become_shadings_and_alpha_becomes_graphics_state() {
+    let gradient = r#"<a:gradFill><a:gsLst><a:gs pos="0"><a:srgbClr val="FF0000"/></a:gs><a:gs pos="50000"><a:srgbClr val="00FF00"/></a:gs><a:gs pos="100000"><a:srgbClr val="0000FF"/></a:gs></a:gsLst><a:lin ang="0" scaled="1"/></a:gradFill>"#;
+    let (pdf, warnings) = pdf_of(gradient);
+    assert!(pdf.contains("/ShadingType 2"), "{pdf}");
+    assert!(pdf.contains("/FunctionType 3"));
+    assert!(pdf.contains("/Pattern cs"));
+    assert!(
+        !warnings.iter().any(|w| w.contains("PDF output")),
+        "{warnings:?}"
+    );
+    let radial = r#"<a:gradFill><a:gsLst><a:gs pos="0"><a:srgbClr val="FF0000"/></a:gs><a:gs pos="100000"><a:srgbClr val="0000FF"/></a:gs></a:gsLst><a:path path="circle"><a:fillToRect l="50000" t="50000" r="50000" b="50000"/></a:path></a:gradFill>"#;
+    assert!(pdf_of(radial).0.contains("/ShadingType 3"));
+    let alpha = r#"<a:solidFill><a:srgbClr val="FF0000"><a:alpha val="60000"/></a:srgbClr></a:solidFill><a:ln w="12700"><a:solidFill><a:srgbClr val="0000FF"><a:alpha val="50000"/></a:srgbClr></a:solidFill></a:ln>"#;
+    let (pdf, warnings) = pdf_of(alpha);
+    assert!(pdf.contains("/ca 0.6") && pdf.contains("/CA 0.5"), "{pdf}");
+    assert!(
+        !warnings.iter().any(|w| w.contains("PDF output")),
+        "{warnings:?}"
+    );
+}
+#[test]
+fn shadows_are_rasterized_under_vector_text_and_reported() {
+    let shadow = r#"<a:solidFill><a:srgbClr val="FFFFFF"/></a:solidFill><a:effectLst><a:outerShdw blurRad="38100" dist="38100" dir="2700000"><a:srgbClr val="000000"><a:alpha val="40000"/></a:srgbClr></a:outerShdw></a:effectLst>"#;
+    let (pdf, warnings) = pdf_of(shadow);
+    assert!(pdf.contains("/SMask"), "{pdf}");
+    assert!(pdf.contains("/FlateDecode"));
+    // The shape and its text are still drawn as vectors on top of the shadow raster.
+    assert!(pdf.contains("/ActualText <FEFF3042>"));
+    assert!(
+        warnings.contains(&"Filter effects are rasterized in PDF output".to_string()),
+        "{warnings:?}"
+    );
+    let pattern = r#"<a:pattFill prst="dkUpDiag"><a:fgClr><a:srgbClr val="000000"/></a:fgClr><a:bgClr><a:srgbClr val="FFFFFF"/></a:bgClr></a:pattFill>"#;
+    let (pdf, warnings) = pdf_of(pattern);
+    assert!(pdf.contains("/Subtype /Image"));
+    assert!(
+        warnings.iter().any(|w| w.contains("Pattern fills")),
+        "{warnings:?}"
+    );
+}
+#[test]
+fn strict_mode_leaves_no_pdf_or_temporary_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("input.pptx");
+    let out = dir.path().join("out.pdf");
     fixture(&input, "", false);
     let mut opts = options();
     opts.strict = true;
     let error = convert_pdf(&input, &out, &opts).unwrap_err();
     assert!(error.downcast_ref::<rhodopsin::StrictModeError>().is_some());
     assert!(!out.exists());
+    assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1);
 }
 #[test]
 fn all_embedding_restrictions_are_rejected_before_publication() {

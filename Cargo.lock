@@ -919,6 +919,7 @@ dependencies = [
  "base64 0.22.1",
  "clap",
  "imagesize",
+ "miniz_oxide 0.8.9",
  "png",
  "resvg",
  "rhodopsin-xlsx",

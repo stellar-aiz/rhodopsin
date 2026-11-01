@@ -52,6 +52,8 @@ pub struct Slide {
     /// One-based position in the deck, counting hidden slides that were skipped.
     pub number: usize,
     pub hidden: bool,
+    /// Package part name of the slide, for diagnostics added after rendering.
+    pub part: String,
     pub svg: String,
     pub warnings: Vec<String>,
     pub diagnostics: Vec<Diagnostic>,
@@ -574,6 +576,7 @@ fn render_slide(
     Ok(Some(Slide {
         number: 0,
         hidden,
+        part: name.into(),
         svg,
         warnings,
         diagnostics,
