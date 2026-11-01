@@ -19,9 +19,15 @@ pub struct Options {
     pub no_system_fonts: bool,
 }
 
-pub fn is_xlsx(path: &Path) -> bool {
-    path.extension()
-        .is_some_and(|extension| extension.eq_ignore_ascii_case("xlsx"))
+/// Whether the input is a spreadsheet. `.xls` and `.xlsm` are routed here too, so the
+/// spreadsheet renderer refuses them with its own reason instead of the PPTX pipeline
+/// failing on missing presentation parts.
+pub fn is_spreadsheet(path: &Path) -> bool {
+    path.extension().is_some_and(|extension| {
+        ["xlsx", "xlsm", "xls"]
+            .iter()
+            .any(|known| extension.eq_ignore_ascii_case(known))
+    })
 }
 
 /// Result document for `--format png` with XLSX input.
@@ -162,7 +168,10 @@ mod tests {
     fn option_documents_echo_the_option_name_without_values() {
         assert!(unsupported_option("--font-map").contains("option: \"--font-map\"\n"));
         assert!(unsupported_format().contains("code: FORMAT_NOT_SUPPORTED"));
-        assert!(is_xlsx(Path::new("book.XLSX")));
-        assert!(!is_xlsx(Path::new("book.xlsm")));
+        assert!(is_spreadsheet(Path::new("book.XLSX")));
+        assert!(is_spreadsheet(Path::new("book.xlsm")));
+        assert!(is_spreadsheet(Path::new("book.Xls")));
+        assert!(!is_spreadsheet(Path::new("book.pptx")));
+        assert!(!is_spreadsheet(Path::new("book.xlsx.pptx")));
     }
 }

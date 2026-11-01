@@ -264,3 +264,38 @@ fn xlsx_denied_reads_fail_without_leaking_under_seatbelt() {
         assert!(!output.exists());
     }
 }
+
+#[test]
+fn xls_and_xlsm_are_refused_as_spreadsheets_not_as_pptx() {
+    let dir = tempfile::tempdir().unwrap();
+    // A legacy binary workbook signature, and a renamed OOXML workbook with macros enabled.
+    let legacy = dir.path().join("book.xls");
+    fs::write(
+        &legacy,
+        [0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1, 0, 0, 0, 0],
+    )
+    .unwrap();
+    let macro_enabled = dir.path().join("book.XLSM");
+    fs::copy(workbook(dir.path(), "<sheetData/>"), &macro_enabled).unwrap();
+    for input in [&legacy, &macro_enabled] {
+        let (code, stdout, stderr) = run([input.as_os_str(), "--format".as_ref(), "pdf".as_ref()]);
+        assert_eq!(code, Some(1), "{stderr}");
+        assert!(stdout.is_empty());
+        assert!(stderr.contains("  - code: INVALID_INPUT\n"), "{stderr}");
+        assert!(
+            stderr.contains("reason: input_extension_not_xlsx\n"),
+            "{stderr}"
+        );
+        assert!(!stderr.contains("presentation"), "{stderr}");
+        assert!(!input.with_extension("pdf").exists());
+    }
+    // A legacy file renamed to .xlsx is refused for its contents.
+    let renamed = dir.path().join("legacy.xlsx");
+    fs::copy(&legacy, &renamed).unwrap();
+    let (code, _, stderr) = run([renamed.as_os_str(), "--format".as_ref(), "pdf".as_ref()]);
+    assert_eq!(code, Some(1), "{stderr}");
+    assert!(
+        stderr.contains("reason: encrypted_or_legacy_workbook\n"),
+        "{stderr}"
+    );
+}
