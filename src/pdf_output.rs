@@ -1,5 +1,8 @@
 //! PDF API and no-clobber publication. Keep the PNG report and API unchanged.
-use crate::{ConvertOptions, Diagnostic, FontReport, pdf, prepare, report_fonts};
+use crate::{
+    ConvertOptions, Diagnostic, FontReport, LineHeightReport, pdf, prepare, report_fonts,
+    report_line_heights,
+};
 use anyhow::{Context, Result, ensure};
 use serde::Serialize;
 use std::{
@@ -34,6 +37,7 @@ pub struct PdfConversionReport {
     pub skipped_hidden_slides: Vec<usize>,
     pub system_fonts: bool,
     pub fonts: Vec<FontReport>,
+    pub line_heights: Vec<LineHeightReport>,
     pub slides: Vec<PdfSlideReport>,
 }
 
@@ -125,7 +129,7 @@ fn convert_inner(
         .into());
     }
     let report = PdfConversionReport {
-        schema_version: 1,
+        schema_version: 2,
         version: env!("CARGO_PKG_VERSION"),
         status: if slides.iter().any(|s| !s.warnings.is_empty()) {
             "preview_with_warnings"
@@ -141,6 +145,7 @@ fn convert_inner(
         skipped_hidden_slides: deck.skipped_hidden.clone(),
         system_fonts: !settings.no_system_fonts,
         fonts: report_fonts(&deck, &options),
+        line_heights: report_line_heights(&deck),
         slides,
     };
     let bytes = writer.finish()?;

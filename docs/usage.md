@@ -186,9 +186,9 @@ family priority: Noto Sans CJK JP, Noto Sans JP, Yu Gothic, Hiragino Sans, Meiry
 Arial Unicode MS, Arial, then other families. Ties use PostScript name, family
 name, and collection face index. Coverage matters within a requested family too.
 Measurement and rendering use the same face; fallback can still change widths
-relative to the original font. Text in a substituted family uses a 1.2 em natural
-line height instead of the substitute's own metrics; see
-[substituted fonts](rendering.md#substituted-fonts).
+relative to the original font. Text in a substituted family, like text in a family
+whose line height was measured in PowerPoint, uses a 1.2 em natural line height; see
+[line height](rendering.md#line-height).
 
 ## CLI result documents
 
@@ -244,7 +244,7 @@ quoted and escaped, including newlines and punctuation in paths and font names.
 
 ## Manifest diagnostics
 
-The manifest uses `schema_version: 3`. Version 3 adds `include_hidden`,
+The manifest uses `schema_version: 4`. Version 4 adds `line_heights`; version 3 added `include_hidden`,
 `skipped_hidden_slides` (deck positions of hidden slides that were not rendered), and
 `slides[].hidden`; consumers that pair images with another export should use
 `slides[].slide` rather than the array index. `slides[].warnings` contains deduplicated
@@ -267,6 +267,12 @@ Categories are `unsupported`, `omitted`, `approximation`, `font_substitution`,
 Table locations include row and cell indices.
 
 `fonts` records family, PostScript name, and collection face index.
+`line_heights` lists each requested family laid out in the rendered slides, by name, with
+the `basis` of its natural line height: `powerpoint` (measured in PowerPoint), `font`
+(the font's own metrics; not observed in PowerPoint), or `estimate` (the family is absent
+and a substitute is drawn). The basis is not a diagnostic and does not affect `--strict`;
+see [line height](rendering.md#line-height). The PDF result document carries the same
+`fonts` and `line_heights` (its `schema_version` is 2).
 `slides[].diagnostics[].font` records requested and actual families, PostScript
 name, face index, and reason. Reasons are `family_missing`, `explicit_mapping`,
 `mapped_family_missing`, `glyph_fallback`, and `style_approximation`.

@@ -247,9 +247,14 @@ fn explicit_font_renders_with_no_system_fonts_and_records_actual_face() {
     );
     let manifest: serde_json::Value =
         serde_json::from_slice(&fs::read(out.join("manifest.json")).unwrap()).unwrap();
-    assert_eq!(manifest["schema_version"], 3);
+    assert_eq!(manifest["schema_version"], 4);
     assert_eq!(manifest["system_fonts"], false);
     assert_eq!(manifest["fonts"][0]["family"], "Rhodopsin Metrics Test");
+    // PowerPoint's line height for this family is not measured, and that is recorded.
+    assert_eq!(
+        manifest["line_heights"],
+        serde_json::json!([{"requested_family": "Rhodopsin Metrics Test", "basis": "font"}])
+    );
 }
 
 #[test]

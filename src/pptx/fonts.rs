@@ -1,8 +1,16 @@
 //! Load-order-independent font selection shared by measurement and rendering.
 use super::diagnostics::{FontResolution, Warnings};
+use crate::LineHeightBasis;
 use resvg::usvg::fontdb::{Database, ID, Style, Weight};
 use skrifa::{FontRef, MetadataProvider};
-use std::{cell::RefCell, collections::HashMap};
+use std::{
+    cell::RefCell,
+    collections::{BTreeMap, HashMap},
+};
+
+/// Families whose natural line height was measured in PowerPoint.
+/// See docs/rendering.md#line-height.
+const MEASURED_FAMILIES: [&str; 3] = ["Meiryo UI", "Yu Gothic", "MS PGothic"];
 
 type SelectionKey = (String, bool, bool, String);
 pub(crate) struct Resolver<'a> {
@@ -10,6 +18,7 @@ pub(crate) struct Resolver<'a> {
     mapping: &'a HashMap<String, String>,
     coverage: RefCell<HashMap<(ID, char), bool>>,
     selections: RefCell<HashMap<SelectionKey, Option<ID>>>,
+    line_heights: RefCell<BTreeMap<String, LineHeightBasis>>,
 }
 impl<'a> Resolver<'a> {
     pub fn new(database: &'a Database, mapping: &'a HashMap<String, String>) -> Self {
@@ -18,6 +27,7 @@ impl<'a> Resolver<'a> {
             mapping,
             coverage: RefCell::new(HashMap::new()),
             selections: RefCell::new(HashMap::new()),
+            line_heights: RefCell::new(BTreeMap::new()),
         }
     }
     fn has(&self, id: ID, ch: char) -> bool {
@@ -45,10 +55,31 @@ impl<'a> Resolver<'a> {
                 .any(|(name, _)| name.eq_ignore_ascii_case(family))
         })
     }
-    /// The face belongs to another family than the requested one. Drives both the
-    /// `family_missing` diagnostic and the substituted line metrics in text layout.
-    pub(super) fn substitutes(&self, id: ID, family: &str) -> bool {
+    fn substitutes(&self, id: ID, family: &str) -> bool {
         !self.named(id, family)
+    }
+    /// What the natural line height of `requested` drawn with face `id` is based on, recorded
+    /// for the conversion report. A substitute only estimates the requested font.
+    pub(super) fn line_height(&self, id: ID, requested: &str) -> LineHeightBasis {
+        let basis = if self.substitutes(id, requested) {
+            LineHeightBasis::Estimate
+        } else if MEASURED_FAMILIES.iter().any(|name| self.named(id, name)) {
+            LineHeightBasis::Powerpoint
+        } else {
+            LineHeightBasis::Font
+        };
+        self.line_heights
+            .borrow_mut()
+            .insert(requested.to_owned(), basis);
+        basis
+    }
+    /// Requested families laid out so far, with their line-height basis, by family name.
+    pub fn line_heights(&self) -> Vec<(String, LineHeightBasis)> {
+        self.line_heights
+            .borrow()
+            .iter()
+            .map(|(family, basis)| (family.clone(), *basis))
+            .collect()
     }
     fn best(&self, family: Option<&str>, value: &str, bold: bool, italic: bool) -> Option<ID> {
         let weight = if bold { Weight::BOLD } else { Weight::NORMAL };

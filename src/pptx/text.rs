@@ -3,6 +3,7 @@
 mod bullets;
 use super::fonts::Resolver;
 use super::*;
+use crate::LineHeightBasis;
 #[cfg(test)]
 use resvg::usvg::fontdb::Database;
 use skrifa::raw::TableProvider;
@@ -145,14 +146,13 @@ fn style(
         spacing: prop_number(&all, "spc", 0.0).clamp(-400000.0, 400000.0) / 75.0,
     }
 }
-/// PowerPoint's measured natural line height for substituted families, in em.
-/// See docs/rendering.md#substituted-fonts.
-const SUBSTITUTED_LINE_HEIGHT: f64 = 1.2;
-/// Ascent and descent for a substituted family: the fixed height split by the
-/// substitute's ascent:descent ratio.
-fn substituted_metrics(size: f64, ascent: f64, descent: f64) -> Option<(f64, f64)> {
+/// PowerPoint's measured natural line height, in em. See docs/rendering.md#line-height.
+const POWERPOINT_LINE_HEIGHT: f64 = 1.2;
+/// Ascent and descent of a PowerPoint line: the fixed height split by the face's
+/// ascent:descent ratio.
+fn powerpoint_metrics(size: f64, ascent: f64, descent: f64) -> Option<(f64, f64)> {
     (ascent > 0.0 && descent >= 0.0 && ascent.is_finite() && descent.is_finite()).then(|| {
-        let height = SUBSTITUTED_LINE_HEIGHT * size;
+        let height = POWERPOINT_LINE_HEIGHT * size;
         let ascent = height * ascent / (ascent + descent);
         (ascent, height - ascent)
     })
@@ -181,10 +181,9 @@ fn glyphs(
         .map(|f| f.id);
     let id = internal
         .or_else(|| resolver.select(&style.face, value, style.bold, style.italic, warnings));
-    // A face of another family stands in for the requested one. Per-glyph fallback faces
-    // arrive as internal names and keep their own metrics.
-    let substituted =
-        internal.is_none() && id.is_some_and(|id| resolver.substitutes(id, &requested));
+    // Per-glyph fallback faces arrive as internal names and keep their own metrics.
+    let powerpoint_height = internal.is_none()
+        && id.is_some_and(|id| resolver.line_height(id, &requested) != LineHeightBasis::Font);
     if let Some(id) = id {
         style.face = format!("rhodopsin-face-{id}");
         if let Some(Some(result)) = fonts.with_face_data(id, |data, index| {
@@ -210,8 +209,8 @@ fn glyphs(
                     f64::from(-metrics.descent),
                     f64::from(metrics.leading.max(0.0)),
                 ));
-            let (ascent, descent, leading) = substituted
-                .then(|| substituted_metrics(style.size, ascent, descent))
+            let (ascent, descent, leading) = powerpoint_height
+                .then(|| powerpoint_metrics(style.size, ascent, descent))
                 .flatten()
                 .map_or((ascent, descent, leading), |(a, d)| (a, d, 0.0));
             let gm = font.glyph_metrics(Size::unscaled(), LocationRef::default());
@@ -1418,9 +1417,23 @@ mod tests {
         assert_eq!(strings(wrap(&glyphs, 96.04, true, false)), ["あいう"]);
     }
     #[test]
-    fn substituted_families_use_a_fixed_line_height_split_by_the_substitute_ratio() {
+    fn measured_and_substituted_families_use_powerpoint_line_height_split_by_the_face_ratio() {
         let mut fonts = Database::new();
         fonts.load_font_data(include_bytes!("../../tests/fixtures/metrics.ttf").to_vec());
+        // The same face again under a measured family's names, as a real MS PGothic exposes them.
+        let mut measured = fonts.faces().next().unwrap().clone();
+        measured.families = vec![
+            (
+                "MS PGothic".into(),
+                resvg::usvg::fontdb::Language::English_UnitedStates,
+            ),
+            (
+                "ＭＳ Ｐゴシック".into(),
+                resvg::usvg::fontdb::Language::Japanese_Japan,
+            ),
+        ];
+        measured.post_script_name = "MS-PGothic".into();
+        fonts.push_face_info(measured);
         let same = HashMap::from([(
             "Rhodopsin Metrics Test".to_string(),
             "Rhodopsin Metrics Test".to_string(),
@@ -1430,29 +1443,41 @@ mod tests {
             "Rhodopsin Metrics Test".to_string(),
         )]);
         let none = HashMap::new();
-        // The fixture font's usWin cell is 0.8 em ascent and 0.2 em descent; a substitute
-        // keeps that 4:1 split of a 1.2 em line.
-        for (family, mapping, substituted) in [
-            ("Rhodopsin Metrics Test", &none, false),
-            ("Rhodopsin Metrics Test", &same, false),
-            ("Missing Family", &none, true),
-            ("Missing Family", &mapped, true),
+        // The fixture font's usWin cell is 0.8 em ascent and 0.2 em descent; PowerPoint's
+        // 1.2 em line keeps that 4:1 split.
+        for (family, mapping, basis) in [
+            ("Rhodopsin Metrics Test", &none, LineHeightBasis::Font),
+            ("Rhodopsin Metrics Test", &same, LineHeightBasis::Font),
+            ("MS PGothic", &none, LineHeightBasis::Powerpoint),
+            ("ＭＳ Ｐゴシック", &none, LineHeightBasis::Powerpoint),
+            ("Missing Family", &none, LineHeightBasis::Estimate),
+            ("Missing Family", &mapped, LineHeightBasis::Estimate),
         ] {
-            let (ascent, descent) = if substituted {
-                (0.96, 0.24)
-            } else {
+            let (ascent, descent) = if basis == LineHeightBasis::Font {
                 (0.8, 0.2)
+            } else {
+                (0.96, 0.24)
             };
             let mut style = sample("あ")[0].style.clone();
             style.face = family.into();
             style.size = 24.0;
             let mut warnings = Warnings::default();
-            let measured = glyphs("あA", style, &Resolver::new(&fonts, mapping), &mut warnings);
+            let resolver = Resolver::new(&fonts, mapping);
+            let measured = glyphs("あA", style, &resolver, &mut warnings);
             for glyph in measured {
                 assert!((glyph.ascent - ascent * 24.0).abs() < 1e-9, "{family}");
                 assert!((glyph.descent - descent * 24.0).abs() < 1e-9, "{family}");
                 assert_eq!(glyph.leading, 0.0);
             }
+            assert_eq!(resolver.line_heights(), [(family.to_string(), basis)]);
+            // The basis is provenance for the report, not a diagnostic.
+            assert!(
+                !warnings
+                    .records
+                    .iter()
+                    .any(|d| d.code == Code::Approximation),
+                "{family}"
+            );
         }
     }
     #[test]

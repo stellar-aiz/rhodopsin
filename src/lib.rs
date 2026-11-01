@@ -73,7 +73,24 @@ pub struct ConversionReport {
     pub skipped_hidden_slides: Vec<usize>,
     pub system_fonts: bool,
     pub fonts: Vec<FontReport>,
+    pub line_heights: Vec<LineHeightReport>,
     pub slides: Vec<SlideReport>,
+}
+/// What a requested family's natural line height is based on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LineHeightBasis {
+    /// Measured in PowerPoint with the family's own font.
+    Powerpoint,
+    /// The font's own metrics; PowerPoint's line height for the family is not measured.
+    Font,
+    /// The family is absent; PowerPoint's measured line height stands in for it.
+    Estimate,
+}
+#[derive(Clone, Debug, Serialize)]
+pub struct LineHeightReport {
+    pub requested_family: String,
+    pub basis: LineHeightBasis,
 }
 #[derive(Clone, Debug, Serialize)]
 pub struct FontReport {
@@ -227,7 +244,7 @@ fn convert_inner(
         });
     }
     let manifest = ConversionReport {
-        schema_version: 3,
+        schema_version: 4,
         version: env!("CARGO_PKG_VERSION"),
         status: if has_warnings {
             "preview_with_warnings"
@@ -241,6 +258,7 @@ fn convert_inner(
         skipped_hidden_slides: deck.skipped_hidden.clone(),
         system_fonts: !settings.no_system_fonts,
         fonts: report_fonts(&deck, &options),
+        line_heights: report_line_heights(&deck),
         slides: reports,
     };
     fs::write(
@@ -359,6 +377,15 @@ fn prepare(
     Ok((deck, options, height))
 }
 
+fn report_line_heights(deck: &pptx::Deck) -> Vec<LineHeightReport> {
+    deck.line_heights
+        .iter()
+        .map(|(family, basis)| LineHeightReport {
+            requested_family: family.clone(),
+            basis: *basis,
+        })
+        .collect()
+}
 fn report_fonts(deck: &pptx::Deck, options: &resvg::usvg::Options<'_>) -> Vec<FontReport> {
     options
         .fontdb
