@@ -38,7 +38,7 @@ than PNG; unsupported PDF features fail explicitly. Existing files are never rep
 rhodopsin book.xlsx --format pdf
 ```
 
-The spreadsheet renderer (`crates/xlsx`) is not connected end to end yet, so every workbook currently stops with a diagnostic instead of a PDF.
+The spreadsheet renderer (`src/xlsx`) is not connected end to end yet, so every workbook currently stops with a diagnostic instead of a PDF.
 See [XLSX input](docs/usage.md#xlsx-input) and [docs/xlsx.md](docs/xlsx.md).
 
 ## Fonts and warnings

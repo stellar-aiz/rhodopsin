@@ -9,6 +9,8 @@
 mod pdf;
 mod pdf_output;
 mod pptx;
+#[cfg(feature = "xlsx")]
+pub mod xlsx;
 pub use pdf_output::{PdfConversionReport, PdfSlideReport, convert_pdf};
 
 use anyhow::{Context, Result, bail};

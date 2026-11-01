@@ -1,5 +1,5 @@
 name: Release
-# Publishes the development bundles from crates/xlsx/tools/distribution-bundle.py as a
+# Publishes the development bundles from tools/distribution-bundle.py as a
 # GitHub pre-release (docs/history/20261030_release-publication.md). workflow_dispatch is a
 # dry run: it builds, verifies, and smoke-tests the bundles and keeps them as workflow
 # artifacts without creating a release.
@@ -68,8 +68,8 @@ jobs:
         run: cargo fetch --locked
       - name: Build and verify the bundle
         run: |
-          python crates/xlsx/tools/distribution-bundle.py --target "${{ matrix.target }}" --out "target/distribution/$ZIP"
-          python crates/xlsx/tools/distribution-bundle.py --verify "target/distribution/$ZIP"
+          python tools/distribution-bundle.py --target "${{ matrix.target }}" --out "target/distribution/$ZIP"
+          python tools/distribution-bundle.py --verify "target/distribution/$ZIP"
       - name: Convert a deck with the extracted binary
         # Same font setup as tests/cli.rs, so the result does not depend on runner fonts.
         run: |
@@ -120,7 +120,7 @@ jobs:
           Development build of rhodopsin $VERSION (pre-release). PPTX conversion works with the
           limitations in docs/rendering.md; XLSX input always stops with a diagnostic.
 
-          Each ZIP is the output of crates/xlsx/tools/distribution-bundle.py: the executable,
+          Each ZIP is the output of tools/distribution-bundle.py: the executable,
           LICENSE, NOTICE.txt, licenses/, sbom.cdx.json, and manifest.json (status: development).
           The SBOM lists the dependencies of every target, including development dependencies,
           not only those linked into this executable.

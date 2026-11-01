@@ -6,11 +6,11 @@ rhodopsin converts PPTX slides into PNG images or a PDF, and is gaining XLSX-to-
 
 Keep resource consumption and runtime dependencies small. Conversion runs standalone: no Office, LibreOffice, browser, Python, Node, network, or child process at runtime. Third-party Rust libraries are compatible with this principle; their runtime cost, deployment requirements, and licences are what matter.
 
-- LibreOffice and Excel are development-time comparison references only; the comparators live under `tests/visual/` and `crates/xlsx/tools/`, never in the binary.
+- LibreOffice and Excel are development-time comparison references only; the comparators live under `tests/visual/`, `tools/`, and the `examples/xlsx-*` comparators, never in the binary.
 - Input and output are bounded by explicit limits per layer (archive size, parts, slides, images, PDF objects), and an oversized picture degrades per picture rather than failing the document.
 - A dependency is adopted only when it covers the needed subset; otherwise the subset is implemented from the specification (see [the EMF/WMF survey](history/20261020_emf-wmf-survey.md)).
 
-Canonical code: `Cargo.toml`, `crates/xlsx/Cargo.toml`, `src/pptx.rs` and `src/pptx/raster.rs` (limits), `tests/libreoffice.rs` (`#[ignore]` comparisons).
+Canonical code: `Cargo.toml`, `src/pptx.rs` and `src/pptx/raster.rs` (limits), `tests/libreoffice.rs` (`#[ignore]` comparisons).
 
 ## Fidelity
 
@@ -21,7 +21,7 @@ Reproduce the original document's content, appearance, and layout as faithfully 
 - Thresholds are never relaxed to hide a difference. A known difference stays reproducible, with its fixture, until it is fixed.
 - When Excel's rule is unknown (border precedence, underline geometry, General rounding), the renderer stops instead of guessing.
 
-Canonical code: `src/pptx/geometry/`, `src/pptx/text.rs`, `tests/visual/compare.py` (fixed thresholds), `crates/xlsx/src/format/`, `crates/xlsx/src/page_borders.rs`.
+Canonical code: `src/pptx/geometry/`, `src/pptx/text.rs`, `tests/visual/compare.py` (fixed thresholds), `src/xlsx/format/`, `src/xlsx/page_borders.rs`.
 
 ## Transparency
 
@@ -32,7 +32,7 @@ Make substitutions, approximations, omissions, and unsupported features visible 
 - Diagnostics never carry document content: no cell values, sheet names, paths, or raw library errors.
 - Nothing is described as verified against Office when it was not.
 
-Canonical code: `src/lib.rs` (`DiagnosticCode`), `src/cli_output.rs` and `src/cli_xlsx.rs` (result documents), `crates/xlsx/src/diagnostic.rs`.
+Canonical code: `src/lib.rs` (`DiagnosticCode`), `src/cli_output.rs` and `src/cli_xlsx.rs` (result documents), `src/xlsx/diagnostic.rs`.
 
 ## Observability
 
@@ -42,4 +42,4 @@ Make rendering decisions and their output traceable, with enough diagnostic info
 - Comparison reports record the environment (renderer, reference, fonts and their hashes, thresholds), and recording an environment does not pin it.
 - Regression checks go below whole-page metrics when those hid a defect (line-level and ink-distribution checks for text).
 
-Canonical code: `src/lib.rs` (manifest schema), `tests/visual/compare.py`, `tests/visual/check_environment.py`, `crates/xlsx/src/report.rs`.
+Canonical code: `src/lib.rs` (manifest schema), `tests/visual/compare.py`, `tests/visual/check_environment.py`, `src/xlsx/report.rs`.
