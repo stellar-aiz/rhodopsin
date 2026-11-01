@@ -86,6 +86,7 @@ cargo build --release --locked
 | `make_image_references.py` | A control, an `oleObject`-typed picture, a missing relationship, and an empty crop; the last two are omitted, not fatal | [rendering](rendering.md#known-limitations) |
 | `make_svg_pictures.py` | SVG only, SVG with a PNG fallback (the fallback is drawn), SVG stretched | [rendering](rendering.md#known-limitations) |
 | `make_hidden.py` | Hidden shapes, groups, children, and a layout shape; no diagnostic | [rendering](rendering.md#hidden-elements) |
+| `make_cjk_metrics.py` | Japanese families at 12/18/24 pt measured in PowerPoint; substituted line pitch | [rendering](rendering.md#substituted-fonts) |
 | `make_empty_bullets.py` | Empty and whitespace-only paragraphs draw no marker | [rendering](rendering.md#bullets-and-indentation) |
 | `make_embedded_media.py [size_mib]` | An embedded 40 MiB video and a poster frame; write it outside the repository | [rendering](rendering.md#known-limitations) |
 | `make_text_inheritance.py` | Inherited versus explicit 18 pt; the master `otherStyle` is 24 pt so a wrongly applied style shows | [rendering](rendering.md#inheritance) |

@@ -45,6 +45,11 @@ impl<'a> Resolver<'a> {
                 .any(|(name, _)| name.eq_ignore_ascii_case(family))
         })
     }
+    /// The face belongs to another family than the requested one. Drives both the
+    /// `family_missing` diagnostic and the substituted line metrics in text layout.
+    pub(super) fn substitutes(&self, id: ID, family: &str) -> bool {
+        !self.named(id, family)
+    }
     fn best(&self, family: Option<&str>, value: &str, bold: bool, italic: bool) -> Option<ID> {
         let weight = if bold { Weight::BOLD } else { Weight::NORMAL };
         let style = if italic { Style::Italic } else { Style::Normal };
@@ -99,7 +104,7 @@ impl<'a> Resolver<'a> {
         if let Some(id) = id {
             let reason = if mapped.is_some_and(|name| self.named(id, name)) {
                 Some("explicit_mapping")
-            } else if !self.named(id, family) {
+            } else if self.substitutes(id, family) {
                 Some("family_missing")
             } else {
                 None

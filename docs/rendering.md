@@ -46,6 +46,23 @@ Placeholders match by `idx` from slide to layout and by type from layout to mast
 
 Ordinary text boxes (`txBox=1`) use `presentation/defaultTextStyle`; placeholders inherit layout/master styles; text inside shapes uses `otherStyle`. Run, paragraph, and list values override defaults. Empty paragraphs use the size and font metrics in `endParaRPr`. Fixture: `examples/text-inheritance.pptx`.
 
+## Substituted fonts
+
+When `--font-fallback` lets a face of another family stand in for a requested family (automatic selection or `--font-map`), that run's natural line height is 1.2 times the font size, split into ascent and descent by the substitute's `usWinAscent : usWinDescent` ratio (typographic or `hhea` metrics when OS/2 is absent), with no extra leading. Percentage spacing, `lnSpcReduction`, and fixed-point spacing apply on top as for any font. A family that is present keeps its own `usWin` cell height, and so does a face reached through per-glyph fallback or a present family drawn with an approximated weight or style. The rule is an approximation: it is derived from three Japanese families measured in PowerPoint with their real fonts, and PowerPoint's own missing-font fallback has not been observed (PowerPoint for Mac bundles these families). It applies to every script, so Calibri substituted on macOS also uses it; Calibri's own cell height is 1.22 em.
+
+Measurements on the fixture `tests/visual/make_cjk_metrics.py` (five lines per box at 12, 18, and 24 pt, default spacing), 2026-11-01:
+
+| Source | Face | Line pitch | First baseline below the text top |
+|---|---|---|---|
+| PowerPoint for Mac 16.105.3, PDF export | Meiryo UI, Yu Gothic, MS PGothic (real) | 1.19 to 1.21 em, about 1.2 em on average for all three | 1.00, 0.92, 1.00 to 1.05 em |
+| LibreOffice 26.2.5.2 | Hiragino Sans W3 (pinned) | 1.200 em | not measured |
+| This renderer, substituted | Hiragino Sans W4 | 1.200 em (1.257 em before this rule) | 0.969 em (1.015 em before) |
+| This renderer, real fonts supplied | Meiryo UI, Yu Gothic, MS PGothic | 1.270, 1.287, 1.000 em (`usWin`) | `usWinAscent` |
+
+PowerPoint's pitch is about 1.2 em although the three fonts' `usWin` heights are 1.270, 1.287, and 1.000 em, and 1.2 em times each font's `usWinAscent` share predicts its first baseline (1.00, 0.92, 1.03 em). PowerPoint's baselines are quantized in about 1.2 pt steps, so single intervals alternate. Present fonts keep `usWin` here, which is a known difference from PowerPoint for these families.
+
+The substituted face is best-effort. Selection is unchanged (coverage, style, weight nearest the request, then the family priority in [usage](usage.md#font-discovery-and-fallback)), so regular text on macOS gets `HiraginoSans-W4`, while LibreOffice embeds W3. Neither weight is consistently closer to the originals: kanji ink coverage relative to the real font is Meiryo UI +8% (W4) / −9% (W3), Yu Gothic +65% / +40%, and MS PGothic −2% / −17%. The chosen face is named in the `font_substitution` diagnostic (`post_script_name`), and `--strict` stops on it. A `--font-map` target must be a family name the font database exposes; Hiragino's weight-specific names such as "Hiragino Sans W3" are not, so W3 cannot be selected explicitly.
+
 ## Theme style references
 
 A shape style (`p:style`) supplies theme defaults that explicit properties anywhere in the inheritance chain override: `fillRef` selects a `fillStyleLst` entry (`bgFillStyleLst` for `bgRef` and indices above 1000), `lnRef` a `lnStyleLst` entry, `effectRef` an `effectStyleLst` entry, and `fontRef` a theme font with a text colour. The reference's colour replaces `phClr` in the entry, keeping the entry's colour transforms, and the result goes through the ordinary fill, line, effect, and text code, so gradient and pattern theme fills and theme shadows render like explicit ones. `fontRef` ranks above the master text styles and presentation defaults and below the shape's own run, paragraph, and list properties: PowerPoint shows a default shape's text in the style's `lt1` colour even though the master's `otherStyle` names `tx1`. Placeholders keep their inherited master styles above the reference (only ordinary shapes were measured). Its theme font (`+mn`/`+mj`) is requested when no `latin` typeface is set; the theme's East Asian font only when the theme declares one (an `ea` typeface or a `Jpan` script font). Index 0 (and 1000 for fills) means none; an unresolved index, a `blipFill` theme entry, effect styles other than outer shadows, and 3-D members of an effect style (`scene3d`, `sp3d`) are reported. Fixture: `examples/theme-style.pptx` (`tests/visual/make_theme_style.py`), within the comparison thresholds against LibreOffice (MAE 0.008, 2.3% changed).
@@ -63,7 +80,7 @@ A shape style (`p:style`) supplies theme defaults that explicit properties anywh
 
 `a:bodyPr@vert="vert"` and `"vert270"` are rotated horizontal text: lines are laid out with the box's width and height swapped, then turned 90 degrees clockwise (`vert`) or counter-clockwise (`vert270`). Wrapping, alignment, anchoring, spacing, and insets follow the turned lines, so `algn="l"` starts at the top for `vert` and at the bottom for `vert270`. Shape autofit is unsupported for vertical bodies and reported.
 
-`eaVert` (upright East Asian columns), `wordArtVert`, `wordArtVertRtl`, and `mongolianVert` are laid out horizontally with a `Vertical text is unsupported` diagnostic. An `eaVert` column layout was attempted and not landed: its residual against LibreOffice came from line pitch and face-weight differences shared with horizontal Japanese text, and the thresholds were not relaxed to admit it. Fixture: `examples/vertical-text.pptx` (`tests/visual/make_vertical_text.py`).
+`eaVert` (upright East Asian columns), `wordArtVert`, `wordArtVertRtl`, and `mongolianVert` are laid out horizontally with a `Vertical text is unsupported` diagnostic. An `eaVert` column layout was attempted and not landed: its residual against LibreOffice came from line pitch and face-weight differences shared with horizontal Japanese text (the pitch part is now settled for substituted fonts, see [substituted fonts](#substituted-fonts)), and the thresholds were not relaxed to admit it. Fixture: `examples/vertical-text.pptx` (`tests/visual/make_vertical_text.py`).
 
 ## Table row heights
 
