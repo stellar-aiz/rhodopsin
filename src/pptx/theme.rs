@@ -222,6 +222,10 @@ impl Theme {
             }
         }
     }
+    /// Whether a theme font reference such as `+mn-lt` resolves.
+    pub(super) fn has_font(&self, value: &str) -> bool {
+        self.fonts.contains_key(value)
+    }
     pub(super) fn color(&self, value: &str) -> Option<&str> {
         let mapped = self
             .mapping
