@@ -532,10 +532,28 @@ fn spacing(node: Option<Node<'_, '_>>, tag: &str, natural: f64, default: f64) ->
         .map(|n| natural * number(n, "val", 100000.0) / 100000.0)
         .unwrap_or(default)
 }
-/// Characters that stay turned with the line in `eaVert` columns: brackets, dashes,
-/// and the long vowel mark, whose vertical forms are their turned shapes.
-fn sideways_in_columns(ch: char) -> bool {
-    "ー－～〜…‥―（）［］｛｝〈〉《》「」『』【】〔〕〖〗〘〙〚〛＝＜＞".contains(ch)
+/// How a character is drawn in an `eaVert` column without the font's vertical forms.
+#[derive(Clone, Copy, PartialEq)]
+enum ColumnForm {
+    /// East Asian characters stand upright.
+    Upright,
+    /// Upright, moved to the upper right of the cell, where the vertical forms of
+    /// these marks sit.
+    UpperRight,
+    /// Turned with the line: Latin text, and brackets, dashes, and the long vowel mark,
+    /// whose vertical forms are their turned shapes.
+    Sideways,
+}
+fn column_form(ch: char) -> ColumnForm {
+    if "、。，．".contains(ch) {
+        ColumnForm::UpperRight
+    } else if !is_east_asian(ch)
+        || "ー－～〜…‥―（）［］｛｝〈〉《》「」『』【】〔〕〖〗〘〙〚〛＝＜＞".contains(ch)
+    {
+        ColumnForm::Sideways
+    } else {
+        ColumnForm::Upright
+    }
 }
 /// Turn East Asian characters upright for an `eaVert` column. Their advance along the
 /// column comes from the font's vertical metrics, or the em size without them.
@@ -543,7 +561,7 @@ fn stand_upright(glyphs: &mut [Glyph], warnings: &mut Warnings) {
     let mut missing_metrics = false;
     for glyph in glyphs
         .iter_mut()
-        .filter(|g| is_east_asian(g.ch) && !sideways_in_columns(g.ch))
+        .filter(|g| column_form(g.ch) != ColumnForm::Sideways)
     {
         glyph.upright = true;
         glyph.advance = glyph.vertical_advance.unwrap_or_else(|| {
@@ -684,31 +702,25 @@ fn auto_fit(nodes: &[Node<'_, '_>], warnings: &mut Warnings) -> AutoFit {
     result
 }
 
-/// How lines run inside the text box (`a:bodyPr@vert`).
-#[derive(Clone, Copy, PartialEq)]
-enum Flow {
-    Horizontal,
-    /// `vert`: horizontal lines turned 90 degrees clockwise.
+/// Quarter turn of vertical text (`a:bodyPr@vert`).
+#[derive(Clone, Copy)]
+enum Turn {
+    /// `vert` and `eaVert`: horizontal lines turned 90 degrees clockwise.
     Clockwise,
     /// `vert270`: horizontal lines turned 90 degrees counter-clockwise.
     CounterClockwise,
-    /// `eaVert`: columns from right to left with upright East Asian characters,
-    /// laid out as clockwise lines whose upright glyphs are turned back.
-    EastAsian,
 }
-impl Flow {
-    /// Inset keys (and table-cell margin keys and defaults) that act as the left,
-    /// right, top, and bottom insets of the lines once they are turned.
-    fn insets(self) -> [(&'static str, &'static str, f64); 4] {
-        let l = ("lIns", "marL", 91440.0);
-        let r = ("rIns", "marR", 91440.0);
-        let t = ("tIns", "marT", 45720.0);
-        let b = ("bIns", "marB", 45720.0);
-        match self {
-            Flow::Horizontal => [l, r, t, b],
-            Flow::Clockwise | Flow::EastAsian => [t, b, r, l],
-            Flow::CounterClockwise => [b, t, l, r],
-        }
+/// Inset keys (with the table-cell margin keys and defaults) that act as the left,
+/// right, top, and bottom insets of the lines once they are turned.
+fn insets(turn: Option<Turn>) -> [(&'static str, &'static str, f64); 4] {
+    let l = ("lIns", "marL", 91440.0);
+    let r = ("rIns", "marR", 91440.0);
+    let t = ("tIns", "marT", 45720.0);
+    let b = ("bIns", "marB", 45720.0);
+    match turn {
+        None => [l, r, t, b],
+        Some(Turn::Clockwise) => [t, b, r, l],
+        Some(Turn::CounterClockwise) => [b, t, l, r],
     }
 }
 
@@ -726,32 +738,42 @@ pub(super) fn render<'a>(
         .chain(source.inherited.iter().copied())
         .filter_map(|n| child(n, A, "bodyPr"))
         .find_map(|n| n.attribute("vert"));
-    let flow = match vert {
-        None | Some("horz") => Flow::Horizontal,
-        Some("vert") => Flow::Clockwise,
-        Some("vert270") => Flow::CounterClockwise,
-        Some("eaVert") => Flow::EastAsian,
+    // `eaVert` columns are clockwise lines whose East Asian characters stand upright.
+    let (turn, upright) = match vert {
+        None | Some("horz") => (None, false),
+        Some("vert") => (Some(Turn::Clockwise), false),
+        Some("vert270") => (Some(Turn::CounterClockwise), false),
+        Some("eaVert") => (Some(Turn::Clockwise), true),
         Some(_) => {
             warn(warnings, "Vertical text is unsupported");
-            Flow::Horizontal
+            (None, false)
         }
     };
-    if flow == Flow::Horizontal {
-        return layout(source, w, h, flow, theme, options, svg, warnings);
-    }
-    if flow == Flow::EastAsian {
+    let Some(turn) = turn else {
+        return layout(source, w, h, None, false, theme, options, svg, warnings);
+    };
+    if upright {
         warnings.push(
             Code::Approximation,
             "Vertical East Asian text turns or shifts horizontal glyphs instead of using the font's vertical forms",
         );
     }
     // Lay the lines out in the box with its sides swapped, then turn them into place.
-    svg.push_str(&if flow == Flow::CounterClockwise {
-        format!("<g transform=\"translate(0 {h}) rotate(-90)\">")
-    } else {
-        format!("<g transform=\"translate({w} 0) rotate(90)\">")
+    svg.push_str(&match turn {
+        Turn::Clockwise => format!("<g transform=\"translate({w} 0) rotate(90)\">"),
+        Turn::CounterClockwise => format!("<g transform=\"translate(0 {h}) rotate(-90)\">"),
     });
-    layout(source, h, w, flow, theme, options, svg, warnings);
+    layout(
+        source,
+        h,
+        w,
+        Some(turn),
+        upright,
+        theme,
+        options,
+        svg,
+        warnings,
+    );
     svg.push_str("</g>");
     // Vertical bodies never autofit, so the box keeps its size.
     TextExtent {
@@ -768,7 +790,8 @@ fn layout(
     source: TextBody<'_>,
     w: f64,
     h: f64,
-    flow: Flow,
+    turn: Option<Turn>,
+    upright: bool,
     theme: &Theme,
     options: &RenderOptions<'_>,
     svg: &mut String,
@@ -816,9 +839,8 @@ fn layout(
             .unwrap_or_else(|| prop_number(&body_props, key, default))
             / EMU
     };
-    let [left, right, top, bottom] = flow
-        .insets()
-        .map(|(key, cell_key, default)| margin(key, cell_key, default));
+    let [left, right, top, bottom] =
+        insets(turn).map(|(key, cell_key, default)| margin(key, cell_key, default));
     let wrap_enabled = attr(&body_props, "wrap") != Some("none");
     let available = (w - left - right).max(1.0);
     let placeholder_type = bodies
@@ -964,7 +986,7 @@ fn layout(
                 }
             }
         }
-        if flow == Flow::EastAsian {
+        if upright {
             stand_upright(&mut all, warnings);
         }
         // The counter is advanced for every paragraph so numbering stays as before;
@@ -1254,8 +1276,7 @@ fn layout(
                 let mut position = x;
                 for (i, g) in line.glyphs[start..end].iter().enumerate() {
                     let center = position + g.offset + g.advance / 2.0;
-                    // Vertical forms of these marks sit in the upper-right quadrant.
-                    let shift = if can_hang(g.ch) {
+                    let shift = if column_form(g.ch) == ColumnForm::UpperRight {
                         format!(" translate({} {})", style.size / 2.0, -style.size / 2.0)
                     } else {
                         String::new()
