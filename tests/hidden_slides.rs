@@ -94,7 +94,7 @@ fn hidden_slides_are_skipped_by_default_and_recorded() {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    assert_eq!(manifest["schema_version"], 3);
+    assert_eq!(manifest["schema_version"], 4);
     assert_eq!(manifest["include_hidden"], false);
     assert_eq!(numbers(&manifest, "skipped_hidden_slides"), [2, 3]);
     let slides = manifest["slides"].as_array().unwrap();

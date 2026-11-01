@@ -86,6 +86,14 @@ fn pdf_pages_text_order_hidden_policy_and_common_diagnostics() {
         serde_json::to_value(pdf.fonts).unwrap(),
         serde_json::to_value(png.fonts).unwrap()
     );
+    assert_eq!(
+        serde_json::to_value(&pdf.line_heights).unwrap(),
+        serde_json::json!([{"requested_family": "Pptx CJK", "basis": "font"}])
+    );
+    assert_eq!(
+        serde_json::to_value(pdf.line_heights).unwrap(),
+        serde_json::to_value(png.line_heights).unwrap()
+    );
     opts.include_hidden = true;
     let all = convert_pdf(&input, dir.path().join("all.pdf"), &opts).unwrap();
     assert_eq!(all.pages, 2);

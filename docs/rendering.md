@@ -46,9 +46,19 @@ Placeholders match by `idx` from slide to layout and by type from layout to mast
 
 Ordinary text boxes (`txBox=1`) use `presentation/defaultTextStyle`; placeholders inherit layout/master styles; text inside shapes uses `otherStyle`. Run, paragraph, and list values override defaults. Empty paragraphs use the size and font metrics in `endParaRPr`. Fixture: `examples/text-inheritance.pptx`.
 
-## Substituted fonts
+## Line height
 
-When `--font-fallback` lets a face of another family stand in for a requested family (automatic selection or `--font-map`), that run's natural line height is 1.2 times the font size, split into ascent and descent by the substitute's `usWinAscent : usWinDescent` ratio (typographic or `hhea` metrics when OS/2 is absent), with no extra leading. Percentage spacing, `lnSpcReduction`, and fixed-point spacing apply on top as for any font. A family that is present keeps its own `usWin` cell height, and so does a face reached through per-glyph fallback or a present family drawn with an approximated weight or style. The rule is an approximation: it is derived from three Japanese families measured in PowerPoint with their real fonts, and PowerPoint's own missing-font fallback has not been observed (PowerPoint for Mac bundles these families). It applies to every script, so Calibri substituted on macOS also uses it; Calibri's own cell height is 1.22 em.
+A run's natural line height follows one priority order, keyed on what is known about the requested family, and the result records it per requested family as `line_heights[].basis` (see [manifest diagnostics](usage.md#manifest-diagnostics)):
+
+| Requested family | Natural line height | `basis` |
+|---|---|---|
+| Present, and one of the families measured in PowerPoint: Meiryo UI, Yu Gothic, MS PGothic | 1.2 em | `powerpoint` |
+| Present, any other family | the font's own `usWin` cell (typographic or `hhea` metrics when OS/2 is absent) | `font` |
+| Absent; with `--font-fallback` a face of another family stands in (automatic selection or `--font-map`) | 1.2 em | `estimate` |
+
+The 1.2 em line is split into ascent and descent by the drawn face's `usWinAscent : usWinDescent` ratio, with no extra leading. A family counts as measured when the selected face exposes one of the three names, so Japanese requests such as `游ゴシック` or `ＭＳ Ｐゴシック` match too, as do other weights of those families (only the regular weight was measured); `Meiryo`, `Yu Gothic UI`, and `MS Gothic` are other families. Percentage spacing, `lnSpcReduction`, and fixed-point spacing apply on top as for any font. A face reached through per-glyph fallback keeps its own cell height.
+
+`font` means PowerPoint's line height for the family has not been observed: the run is laid out with the font's metrics, which can differ from PowerPoint (Calibri's own cell is 1.22 em). `estimate` means the requested font's metrics are unknown, and PowerPoint's measured 1.2 em stands in for them; PowerPoint's own missing-font fallback has not been observed (PowerPoint for Mac bundles these families), and the rule applies to every script. Neither is a diagnostic, so `--strict` does not stop on them; counting `font` families over a corpus shows which families to measure next.
 
 Measurements on the fixture `tests/visual/make_cjk_metrics.py` (five lines per box at 12, 18, and 24 pt, default spacing), 2026-11-01:
 
@@ -56,10 +66,12 @@ Measurements on the fixture `tests/visual/make_cjk_metrics.py` (five lines per b
 |---|---|---|---|
 | PowerPoint for Mac 16.105.3, PDF export | Meiryo UI, Yu Gothic, MS PGothic (real) | 1.19 to 1.21 em, about 1.2 em on average for all three | 1.00, 0.92, 1.00 to 1.05 em |
 | LibreOffice 26.2.5.2 | Hiragino Sans W3 (pinned) | 1.200 em | not measured |
-| This renderer, substituted | Hiragino Sans W4 | 1.200 em (1.257 em before this rule) | 0.969 em (1.015 em before) |
-| This renderer, real fonts supplied | Meiryo UI, Yu Gothic, MS PGothic | 1.270, 1.287, 1.000 em (`usWin`) | `usWinAscent` |
+| This renderer, substituted | Hiragino Sans W4 | 1.200 em (1.257 em before #89) | 0.969 em (1.015 em before) |
+| This renderer, real fonts supplied | Meiryo UI, Yu Gothic, MS PGothic | 1.200 em (1.270, 1.287, 1.000 em `usWin` before #133) | 1.00, 0.92, 1.03 em (`usWinAscent` before) |
 
-PowerPoint's pitch is about 1.2 em although the three fonts' `usWin` heights are 1.270, 1.287, and 1.000 em, and 1.2 em times each font's `usWinAscent` share predicts its first baseline (1.00, 0.92, 1.03 em). PowerPoint's baselines are quantized in about 1.2 pt steps, so single intervals alternate. Present fonts keep `usWin` here, which is a known difference from PowerPoint for these families.
+PowerPoint's pitch is about 1.2 em although the three fonts' `usWin` heights are 1.270, 1.287, and 1.000 em, and 1.2 em times each font's `usWinAscent` share predicts its first baseline (1.00, 0.92, 1.03 em). PowerPoint's baselines are quantized in about 1.2 pt steps, so single intervals alternate; the renderer does not quantize.
+
+### Substituted faces
 
 The substituted face is best-effort. Selection is unchanged (coverage, style, weight nearest the request, then the family priority in [usage](usage.md#font-discovery-and-fallback)), so regular text on macOS gets `HiraginoSans-W4`, while LibreOffice embeds W3. Neither weight is consistently closer to the originals: kanji ink coverage relative to the real font is Meiryo UI +8% (W4) / −9% (W3), Yu Gothic +65% / +40%, and MS PGothic −2% / −17%. The chosen face is named in the `font_substitution` diagnostic (`post_script_name`), and `--strict` stops on it. A `--font-map` target must be a family name the font database exposes; Hiragino's weight-specific names such as "Hiragino Sans W3" are not, so W3 cannot be selected explicitly.
 
@@ -82,7 +94,7 @@ A shape style (`p:style`) supplies theme defaults that explicit properties anywh
 
 `eaVert` lays the body out as clockwise lines, so columns run top to bottom and from right to left, then turns East Asian characters (the CJK, kana, and full-width ranges) back upright. An upright character advances along the column by the font's `vmtx` advance, or by the em size when the font has none, which adds a `Font has no vertical metrics` approximation. Other characters, including ASCII letters and digits, stay turned with the line; there is no tate-chu-yoko. The font's vertical forms (OpenType `vert`/`vrt2`) are not applied: brackets, dashes, and the long vowel mark are drawn turned, and `、。，．` are moved to the upper right of their cell, which every `eaVert` body reports as an approximation. Character spacing continues across a change between upright and turned characters. Table-cell vertical text (`a:tcPr@vert`), `wordArtVert`, `wordArtVertRtl`, and `mongolianVert` are laid out horizontally with an unsupported diagnostic. Fixture: `examples/vertical-text.pptx` (`tests/visual/make_vertical_text.py`).
 
-Against LibreOffice 26.2.5.2 at width 1600 with the default thresholds (2026-11-01), the `eaVert` page measures MAE 0.0180 and 4.08% changed (0.0605 and 8.55% when it was laid out horizontally), and the rotated page 0.0063 and 1.49%. The `eaVert` result depends on the 1.2 em pitch of [substituted fonts](#substituted-fonts); the remaining differences are glyph forms of punctuation and the Hiragino weight. PowerPoint's rendering of this fixture has not been measured.
+Against LibreOffice 26.2.5.2 at width 1600 with the default thresholds (2026-11-01), the `eaVert` page measures MAE 0.0180 and 4.08% changed (0.0605 and 8.55% when it was laid out horizontally), and the rotated page 0.0063 and 1.49%. The `eaVert` result depends on the 1.2 em pitch of [substituted fonts](#line-height); the remaining differences are glyph forms of punctuation and the Hiragino weight. PowerPoint's rendering of this fixture has not been measured.
 
 ## Table row heights
 

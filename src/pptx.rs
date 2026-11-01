@@ -47,6 +47,8 @@ pub struct Deck {
     pub slides: Vec<Slide>,
     /// One-based deck positions of hidden slides that were not rendered.
     pub skipped_hidden: Vec<usize>,
+    /// Requested families laid out in the rendered slides, with their line-height basis.
+    pub line_heights: Vec<(String, crate::LineHeightBasis)>,
 }
 pub struct Slide {
     /// One-based position in the deck, counting hidden slides that were skipped.
@@ -285,6 +287,7 @@ pub fn read(path: &Path, options: &RenderOptions<'_>, include_hidden: bool) -> R
         height,
         slides,
         skipped_hidden,
+        line_heights: options.fonts.line_heights(),
     })
 }
 
