@@ -95,6 +95,9 @@ pub struct Pdf {
     /// Scene location of the node being written, for diagnostics.
     location: String,
     notes: Vec<(Code, String, String)>,
+    /// Pixels allocated by rasters so far, against `raster_budget`.
+    raster_pixels: u64,
+    raster_budget: u64,
 }
 /// Resources referenced by one content stream, by dictionary and name.
 #[derive(Default)]
@@ -123,6 +126,8 @@ impl Res {
 const RASTER_SCALE: f32 = 2.0;
 /// Largest raster, matching the decoded image pixel limit.
 const RASTER_PIXELS: u64 = 16_777_216;
+/// Pixels all rasters of one document may allocate, so many effects cannot multiply the cost.
+const RASTER_TOTAL: u64 = 4 * RASTER_PIXELS;
 const FILTER_NOTE: &str = "Filter effects are rasterized in PDF output";
 fn blend_name(mode: usvg::BlendMode) -> &'static str {
     use usvg::BlendMode::*;
@@ -145,6 +150,34 @@ fn blend_name(mode: usvg::BlendMode) -> &'static str {
         Luminosity => "Luminosity",
     }
 }
+/// Render `node` into `pixmap`, whose top-left corner is `origin` in canvas units, at `scale`
+/// pixels per unit. `render_node` applies only the node's own transform after shifting by the
+/// node's layer box, so the parent's transform is folded into the root transform around that
+/// shift.
+fn render_at(
+    node: &usvg::Node,
+    origin: resvg::tiny_skia::NonZeroRect,
+    scale: f32,
+    pixmap: &mut resvg::tiny_skia::Pixmap,
+) -> Result<()> {
+    let Some(bbox) = node.abs_layer_bounding_box() else {
+        return Ok(());
+    };
+    let parent = match node {
+        usvg::Node::Group(g) => g
+            .abs_transform()
+            .pre_concat(g.transform().invert().context("Singular group transform")?),
+        usvg::Node::Path(p) => p.abs_transform(),
+        usvg::Node::Image(i) => i.abs_transform(),
+        usvg::Node::Text(t) => t.abs_transform(),
+    };
+    let root = Transform::from_scale(scale, scale)
+        .pre_translate(-origin.x(), -origin.y())
+        .pre_concat(parent)
+        .pre_translate(bbox.x(), bbox.y());
+    resvg::render_node(node, root, &mut pixmap.as_mut());
+    Ok(())
+}
 /// Whether a filter's last step merges its result under the unfiltered source graphic.
 fn keeps_source_on_top(filter: &usvg::filter::Filter) -> bool {
     filter.primitives().last().is_some_and(|p| match p.kind() {
@@ -165,6 +198,8 @@ impl Pdf {
             base: Transform::identity(),
             location: String::new(),
             notes: Vec::new(),
+            raster_pixels: 0,
+            raster_budget: RASTER_TOTAL,
         }
     }
     fn object(&mut self, data: impl Into<Vec<u8>>) -> usize {
@@ -391,71 +426,120 @@ impl Pdf {
         path.fill().is_some_and(|f| raster_only(f.paint()))
             || path.stroke().is_some_and(|s| raster_only(s.paint()))
     }
-    /// Draw `node` as an RGBA image with a soft mask at `RASTER_SCALE` pixels per canvas unit.
+    /// Draw `node` as an RGBA image with a soft mask at up to `RASTER_SCALE` pixels per canvas
+    /// unit. With `under_vectors`, the node is a group whose filters end by merging their result
+    /// under the source graphic: the raster then holds only the filter result, recovered by
+    /// removing the source graphic, and the caller draws the source as vectors on top. Returns
+    /// whether anything was drawn (false when the raster is omitted for size).
     fn raster(
         &mut self,
         node: &usvg::Node,
         out: &mut String,
         res: &mut Res,
         message: &str,
-    ) -> Result<()> {
+        under_vectors: bool,
+    ) -> Result<bool> {
         let Some(bbox) = node.abs_layer_bounding_box() else {
-            return Ok(());
+            return Ok(true);
         };
-        let area = bbox.width() * bbox.height();
-        let scale = RASTER_SCALE.min((RASTER_PIXELS as f32 / area).sqrt());
+        let size = |scale: f32| {
+            (
+                (bbox.width() * scale).ceil().max(1.0) as u64,
+                (bbox.height() * scale).ceil().max(1.0) as u64,
+            )
+        };
+        let mut scale =
+            RASTER_SCALE.min((RASTER_PIXELS as f32 / (bbox.width() * bbox.height())).sqrt());
+        // Rounding up can push the area over the limit; shrink until the pixel size fits.
+        while scale >= 1.0 && size(scale).0 * size(scale).1 > RASTER_PIXELS {
+            scale *= 0.99;
+        }
         if scale < 1.0 {
             self.note(
                 Code::Omitted,
                 "Omitted an element whose PDF raster would exceed the image pixel limit",
             );
-            return Ok(());
+            return Ok(false);
         }
-        let (w, h) = (
-            (bbox.width() * scale).ceil().max(1.0) as u32,
-            (bbox.height() * scale).ceil().max(1.0) as u32,
-        );
+        let (w, h) = size(scale);
+        // The source pass of `under_vectors` allocates a second pixmap of the same size.
+        let cost = w * h * if under_vectors { 2 } else { 1 };
+        if self.raster_pixels + cost > self.raster_budget {
+            self.note(
+                Code::Omitted,
+                "Omitted an element because the document's PDF raster budget is spent",
+            );
+            return Ok(false);
+        }
+        self.raster_pixels += cost;
+        let (w, h) = (w as u32, h as u32);
         let mut pixmap =
             resvg::tiny_skia::Pixmap::new(w, h).context("Cannot allocate PDF raster")?;
-        // `render_node` applies only the node's own transform after shifting by the layer box,
-        // so the parent's transform is folded into the root transform around that shift.
-        let parent = match node {
-            usvg::Node::Group(g) => g
-                .abs_transform()
-                .pre_concat(g.transform().invert().context("Singular group transform")?),
-            usvg::Node::Path(p) => p.abs_transform(),
-            usvg::Node::Image(i) => i.abs_transform(),
-            usvg::Node::Text(t) => t.abs_transform(),
-        };
-        let root = Transform::from_scale(scale, scale)
-            .pre_translate(-bbox.x(), -bbox.y())
-            .pre_concat(parent)
-            .pre_translate(bbox.x(), bbox.y());
-        resvg::render_node(node, root, &mut pixmap.as_mut());
-        let (rgb, alpha): (Vec<u8>, Vec<u8>) = pixmap
+        render_at(node, bbox, scale, &mut pixmap)?;
+        if under_vectors {
+            let usvg::Node::Group(group) = node else {
+                bail!("Only groups keep their source as vectors")
+            };
+            let mut source =
+                resvg::tiny_skia::Pixmap::new(w, h).context("Cannot allocate PDF raster")?;
+            for child in group.children() {
+                render_at(child, bbox, scale, &mut source)?;
+            }
+            // Premultiplied `result = source + rest * (1 - source alpha)`, so the rest (the
+            // shadow) is `(result - source) / (1 - source alpha)` wherever the source lets it
+            // show; under an opaque source it is never visible and is left empty.
+            for (r, s) in pixmap.pixels_mut().iter_mut().zip(source.pixels()) {
+                let keep = 255.0 - f32::from(s.alpha());
+                let channel = |a: u8, b: u8| {
+                    if keep < 1.0 {
+                        0
+                    } else {
+                        ((f32::from(a) - f32::from(b)).max(0.0) * 255.0 / keep)
+                            .round()
+                            .min(255.0) as u8
+                    }
+                };
+                let alpha = channel(r.alpha(), s.alpha());
+                let c = |a: u8, b: u8| channel(a, b).min(alpha);
+                *r = resvg::tiny_skia::PremultipliedColorU8::from_rgba(
+                    c(r.red(), s.red()),
+                    c(r.green(), s.green()),
+                    c(r.blue(), s.blue()),
+                    alpha,
+                )
+                .context("Invalid raster pixel")?;
+            }
+        }
+        let (rgb, alpha): (Vec<[u8; 3]>, Vec<u8>) = pixmap
             .pixels()
             .iter()
             .map(|p| {
                 let c = p.demultiply();
                 ([c.red(), c.green(), c.blue()], c.alpha())
             })
-            .fold((Vec::new(), Vec::new()), |(mut rgb, mut alpha), (c, a)| {
-                rgb.extend_from_slice(&c);
-                alpha.push(a);
-                (rgb, alpha)
-            });
-        let id = self.image(w as usize, h as usize, &rgb, Some(&alpha))?;
+            .unzip();
+        let id = self.image(w as usize, h as usize, &rgb.concat(), Some(&alpha))?;
         res.add("XObject", format!("I{id}"), id);
+        // A raster drawn in place of a whole group carries the group's blending.
+        let blend = match node {
+            usvg::Node::Group(g) if !under_vectors => blend_name(g.blend_mode()),
+            _ => "Normal",
+        };
+        let state = if blend == "Normal" {
+            String::new()
+        } else {
+            self.state(1.0, 1.0, blend, res).trim_end().to_owned() + " "
+        };
         writeln!(
             out,
-            "q {} 0 0 {} {} {} cm /I{id} Do Q",
+            "q {state}{} 0 0 {} {} {} cm /I{id} Do Q",
             w as f32 / scale,
             -(h as f32 / scale),
             bbox.x(),
             bbox.y() + h as f32 / scale
         )?;
         self.note(Code::Approximation, message);
-        Ok(())
+        Ok(true)
     }
     /// A Flate-compressed RGB image XObject, with an alpha soft mask when given.
     fn image(&mut self, w: usize, h: usize, rgb: &[u8], alpha: Option<&[u8]>) -> Result<usize> {
@@ -562,8 +646,9 @@ impl Pdf {
         drawn?;
         self.budget(inner.len())?;
         let resources = self.resources(&inner_res);
+        let b = group.abs_layer_bounding_box();
         let form = self.stream(
-            &format!("/Type /XObject /Subtype /Form /BBox [-100000 -100000 100000 100000] /Group << /S /Transparency /I true /K false >> /Resources {resources}"),
+            &format!("/Type /XObject /Subtype /Form /BBox [{} {} {} {}] /Group << /S /Transparency /I true /K false >> /Resources {resources}", b.x() - 1.0, b.y() - 1.0, b.right() + 1.0, b.bottom() + 1.0),
             inner.as_bytes(),
         );
         res.add("XObject", format!("X{form}"), form);
@@ -621,24 +706,31 @@ impl Pdf {
             let result: Result<()> = (|| {
                 match node {
                     usvg::Node::Group(g) if g.mask().is_some() => {
-                        self.raster(node, out, res, "Masks are rasterized in PDF output")?
+                        self.raster(node, out, res, "Masks are rasterized in PDF output", false)?;
                     }
                     usvg::Node::Group(g) if !g.filters().is_empty() => {
-                        self.raster(node, out, res, FILTER_NOTE)?;
                         // A filter that ends by merging its result under the source graphic
                         // (outer shadows) keeps the source as vectors on top of the raster, so
-                        // its text stays text. Any other filter is shown by the raster alone.
-                        if g.filters().iter().all(|f| keeps_source_on_top(f)) {
-                            self.group(g, tree, out, res, &loc)?;
+                        // its text stays text. Any other filter, or one combined with group
+                        // opacity or blending, is shown by the raster alone.
+                        let under_vectors = g.filters().iter().all(|f| keeps_source_on_top(f))
+                            && g.opacity().get() == 1.0
+                            && g.blend_mode() == usvg::BlendMode::Normal;
+                        if self.raster(node, out, res, FILTER_NOTE, under_vectors)? && under_vectors
+                        {
+                            self.contents(g, tree, out, res, &loc)?;
                         }
                     }
                     usvg::Node::Group(g) => self.group(g, tree, out, res, &loc)?,
-                    usvg::Node::Path(p) if Self::needs_raster(p) => self.raster(
-                        node,
-                        out,
-                        res,
-                        "Pattern fills and translucent gradient stops are rasterized in PDF output",
-                    )?,
+                    usvg::Node::Path(p) if Self::needs_raster(p) => {
+                        self.raster(
+                            node,
+                            out,
+                            res,
+                            "Pattern fills and translucent gradient stops are rasterized in PDF output",
+                            false,
+                        )?;
+                    }
                     usvg::Node::Path(p) => self.path(p, out, res)?,
                     usvg::Node::Text(t) => {
                         if t.layouted().iter().any(|span| {
@@ -648,12 +740,14 @@ impl Pdf {
                                     .as_ref()
                                     .is_some_and(|f| !matches!(f.paint(), usvg::Paint::Color(_)))
                         }) {
-                            return self.raster(
+                            self.raster(
                                 node,
                                 out,
                                 res,
                                 "Text with gradient or pattern fill is rasterized in PDF output",
-                            );
+                                false,
+                            )?;
+                            return Ok(());
                         }
                         let actual = t
                             .chunks()
@@ -858,7 +952,10 @@ mod tests {
         let tree = usvg::Tree::from_str(svg, &usvg::Options::default()).unwrap();
         let mut pdf = Pdf::new();
         let notes = pdf.page(&tree).unwrap();
-        (String::from_utf8_lossy(&pdf.finish().unwrap()).into_owned(), notes)
+        (
+            String::from_utf8_lossy(&pdf.finish().unwrap()).into_owned(),
+            notes,
+        )
     }
 
     #[test]
@@ -880,8 +977,32 @@ mod tests {
         assert!(text.contains("/ShadingType 2"));
         assert!(text.contains("/SMask"));
         let messages: Vec<_> = notes.iter().map(|n| n.1.as_str()).collect();
-        assert!(messages.contains(&"Gradient spread methods other than pad are drawn as pad in PDF output"));
-        assert!(messages.contains(&"Pattern fills and translucent gradient stops are rasterized in PDF output"));
+        assert!(
+            messages
+                .contains(&"Gradient spread methods other than pad are drawn as pad in PDF output")
+        );
+        assert!(messages.contains(
+            &"Pattern fills and translucent gradient stops are rasterized in PDF output"
+        ));
+    }
+
+    #[test]
+    fn the_document_raster_budget_stops_further_rasters() {
+        // Three blurred 100 x 100 rectangles need about 210 x 210 x 4 pixels each at 2x; a
+        // budget for two of them omits the third.
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" width="400" height="200"><defs><filter id="f"><feGaussianBlur stdDeviation="1"/></filter></defs><rect width="100" height="100" fill="red" filter="url(#f)"/><rect x="120" width="100" height="100" fill="red" filter="url(#f)"/><rect x="240" width="100" height="100" fill="red" filter="url(#f)"/></svg>"#;
+        let tree = usvg::Tree::from_str(svg, &usvg::Options::default()).unwrap();
+        let mut pdf = Pdf::new();
+        pdf.raster_budget = 2 * 260 * 260;
+        let notes = pdf.page(&tree).unwrap();
+        assert_eq!(
+            notes
+                .iter()
+                .filter(|n| n.1.contains("raster budget"))
+                .count(),
+            1,
+            "{notes:?}"
+        );
     }
 
     #[test]
