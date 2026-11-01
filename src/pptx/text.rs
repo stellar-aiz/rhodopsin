@@ -108,13 +108,13 @@ fn style(
     warnings: &mut Warnings,
 ) -> Style {
     let all: Vec<Node<'_, '_>> = nodes.iter().chain(fallback).copied().collect();
-    // The shape style's theme font is the default face; its East Asian face only when the
-    // theme declares one, so an empty `ea` typeface does not produce a diagnostic per run.
+    // The shape style's theme font is the default Latin face (unresolvable references are
+    // reported by `Theme::font`); its East Asian face only when the theme declares one, so a
+    // theme without one does not produce a diagnostic per run.
     let theme_face = |script: &str| {
         reference
             .and_then(|r| r.font)
             .map(|prefix| format!("{prefix}-{script}"))
-            .filter(|key| theme.has_font(key))
     };
     let latin = face(nodes, "latin")
         .or_else(|| theme_face("lt"))
@@ -122,7 +122,7 @@ fn style(
         .unwrap_or_else(|| "sans-serif".into());
     let requested = if east_asian {
         face(nodes, "ea")
-            .or_else(|| theme_face("ea"))
+            .or_else(|| theme_face("ea").filter(|key| theme.has_font(key)))
             .or_else(|| face(fallback, "ea"))
             .unwrap_or(latin)
     } else {
@@ -800,9 +800,10 @@ fn layout(
                 paragraph_props.extend(child(list, A, "defPPr"));
             }
         }
-        // Properties up to here belong to the shape; the master and presentation defaults
-        // below rank under a shape style's `a:fontRef`.
-        let shape_level = paragraph_props.len();
+        // Properties up to here belong to the shape; for an ordinary shape the master and
+        // presentation defaults below rank under its style's `a:fontRef`. Placeholders keep
+        // their inherited master styles above it (only ordinary shapes were measured).
+        let mut shape_level = paragraph_props.len();
         if !textbox && let Some(style) = source.master_style.and_then(|n| child(n, P, style_kind)) {
             paragraph_props.extend(child(style, A, &level_tag));
             paragraph_props.extend(child(style, A, "defPPr"));
@@ -810,6 +811,9 @@ fn layout(
         if let Some(style) = presentation_style {
             paragraph_props.extend(child(style, A, &level_tag));
             paragraph_props.extend(child(style, A, "defPPr"));
+        }
+        if placeholder_type.is_some() {
+            shape_level = paragraph_props.len();
         }
         let hanging = paragraph_props
             .iter()

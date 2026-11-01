@@ -10,13 +10,6 @@ pub(super) struct Element {
     children: Vec<Element>,
 }
 impl Element {
-    pub(super) fn empty(name: &str) -> Self {
-        Self {
-            name: name.into(),
-            attrs: BTreeMap::new(),
-            children: vec![],
-        }
-    }
     /// An `a:srgbClr` element.
     pub(super) fn rgb(hex: &str) -> Self {
         Self {
@@ -27,6 +20,12 @@ impl Element {
     }
     pub(super) fn has_children(&self) -> bool {
         !self.children.is_empty()
+    }
+    pub(super) fn child_names(&self) -> impl Iterator<Item = &str> {
+        self.children.iter().map(|c| c.name.as_str())
+    }
+    pub(super) fn find(&self, name: &str) -> Option<&Element> {
+        self.children.iter().find(|c| c.name == name)
     }
     pub(super) fn from(node: Node<'_, '_>) -> Self {
         Self {

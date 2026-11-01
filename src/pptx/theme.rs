@@ -6,7 +6,7 @@ pub(super) struct Theme {
     colors: HashMap<String, String>,
     source: Option<String>,
     line_styles: Vec<lines::Element>,
-    /// `a:effectLst` of each `a:effectStyle`, in table order (empty when the style has none).
+    /// Each `a:effectStyle` of the theme, in table order.
     effect_styles: Vec<lines::Element>,
     mapping: HashMap<String, String>,
     fonts: HashMap<String, String>,
@@ -134,11 +134,7 @@ impl Theme {
             .map(|list| {
                 list.children()
                     .filter(|n| n.has_tag_name((A, "effectStyle")))
-                    .map(|style| {
-                        child(style, A, "effectLst")
-                            .map(lines::Element::from)
-                            .unwrap_or_else(|| lines::Element::empty("effectLst"))
-                    })
+                    .map(lines::Element::from)
                     .collect()
             })
             .unwrap_or_default();
@@ -277,10 +273,17 @@ impl Theme {
             );
             return None;
         };
-        if !style.has_children() {
+        // 3-D (`scene3d`, `sp3d`) and other members of the style are not drawn; say so.
+        for name in style.child_names().filter(|name| *name != "effectLst") {
+            warn(
+                warnings,
+                format!("Theme effect style {index} member is unsupported: {name}"),
+            );
+        }
+        let mut effects = style.find("effectLst")?.clone();
+        if !effects.has_children() {
             return None;
         }
-        let mut effects = style.clone();
         effects.placeholder(&Self::reference_color(reference, warnings));
         Some(format!("<root xmlns:a=\"{A}\">{}</root>", effects.xml()))
     }

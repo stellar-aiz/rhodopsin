@@ -5,7 +5,7 @@ use support::*;
 /// A theme whose third fill style is a vertical gradient of the placeholder colour, whose
 /// second effect style is an opaque 8 px shadow to the right, and whose minor font is the
 /// test metrics font.
-const THEME: &str = r#"<a:themeElements><a:clrScheme name="t"><a:dk1><a:srgbClr val="000000"/></a:dk1><a:lt1><a:srgbClr val="FFFFFF"/></a:lt1><a:accent1><a:srgbClr val="0000FF"/></a:accent1></a:clrScheme><a:fontScheme name="t"><a:majorFont><a:latin typeface="Rhodopsin Metrics Test"/><a:ea typeface=""/></a:majorFont><a:minorFont><a:latin typeface="Rhodopsin Metrics Test"/><a:ea typeface=""/></a:minorFont></a:fontScheme><a:fmtScheme name="t"><a:fillStyleLst><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:gradFill rotWithShape="1"><a:gsLst><a:gs pos="0"><a:schemeClr val="phClr"><a:tint val="20000"/></a:schemeClr></a:gs><a:gs pos="100000"><a:schemeClr val="phClr"/></a:gs></a:gsLst><a:lin ang="5400000" scaled="0"/></a:gradFill></a:fillStyleLst><a:lnStyleLst><a:ln w="9525"><a:solidFill><a:schemeClr val="phClr"/></a:solidFill></a:ln></a:lnStyleLst><a:effectStyleLst><a:effectStyle><a:effectLst/></a:effectStyle><a:effectStyle><a:effectLst><a:outerShdw blurRad="0" dist="76200" dir="0" rotWithShape="0"><a:srgbClr val="000000"/></a:outerShdw></a:effectLst></a:effectStyle></a:effectStyleLst></a:fmtScheme></a:themeElements>"#;
+const THEME: &str = r#"<a:themeElements><a:clrScheme name="t"><a:dk1><a:srgbClr val="000000"/></a:dk1><a:lt1><a:srgbClr val="FFFFFF"/></a:lt1><a:accent1><a:srgbClr val="0000FF"/></a:accent1></a:clrScheme><a:fontScheme name="t"><a:majorFont><a:latin typeface="Rhodopsin Metrics Test"/><a:ea typeface=""/></a:majorFont><a:minorFont><a:latin typeface="Rhodopsin Metrics Test"/><a:ea typeface=""/></a:minorFont></a:fontScheme><a:fmtScheme name="t"><a:fillStyleLst><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:gradFill rotWithShape="1"><a:gsLst><a:gs pos="0"><a:schemeClr val="phClr"><a:tint val="20000"/></a:schemeClr></a:gs><a:gs pos="100000"><a:schemeClr val="phClr"/></a:gs></a:gsLst><a:lin ang="5400000" scaled="0"/></a:gradFill></a:fillStyleLst><a:lnStyleLst><a:ln w="9525"><a:solidFill><a:schemeClr val="phClr"/></a:solidFill></a:ln></a:lnStyleLst><a:effectStyleLst><a:effectStyle><a:effectLst/></a:effectStyle><a:effectStyle><a:effectLst><a:outerShdw blurRad="0" dist="76200" dir="0" rotWithShape="0"><a:srgbClr val="000000"/></a:outerShdw></a:effectLst></a:effectStyle><a:effectStyle><a:effectLst/><a:scene3d><a:camera prst="orthographicFront"/><a:lightRig rig="threePt" dir="t"/></a:scene3d><a:sp3d/></a:effectStyle></a:effectStyleLst></a:fmtScheme></a:themeElements>"#;
 
 /// A 60x40 px shape at (10, 10) with the given style references and text body.
 fn styled(style: &str, body: &str) -> String {
@@ -29,7 +29,7 @@ fn render(shapes: &str) -> (resvg::tiny_skia::Pixmap, serde_json::Value) {
     let out = d.path().join("out");
     let theme = format!(r#"<a:theme xmlns:a="{A}">{THEME}</a:theme>"#);
     let master = format!(
-        r#"<p:sldMaster xmlns:p="{P}" xmlns:a="{A}" xmlns:r="{R}"><p:cSld><p:spTree/></p:cSld><p:txStyles><p:titleStyle/><p:bodyStyle/><p:otherStyle><a:lvl1pPr><a:defRPr><a:solidFill><a:srgbClr val="00FF00"/></a:solidFill></a:defRPr></a:lvl1pPr></p:otherStyle></p:txStyles></p:sldMaster>"#
+        r#"<p:sldMaster xmlns:p="{P}" xmlns:a="{A}" xmlns:r="{R}"><p:cSld><p:spTree/></p:cSld><p:txStyles><p:titleStyle/><p:bodyStyle><a:lvl1pPr><a:defRPr><a:solidFill><a:srgbClr val="00FF00"/></a:solidFill></a:defRPr></a:lvl1pPr></p:bodyStyle><p:otherStyle><a:lvl1pPr><a:defRPr><a:solidFill><a:srgbClr val="00FF00"/></a:solidFill></a:defRPr></a:lvl1pPr></p:otherStyle></p:txStyles></p:sldMaster>"#
     );
     write_deck(
         &input,
@@ -101,6 +101,13 @@ fn font_reference_colour_ranks_above_the_master_and_below_the_run() {
     assert_eq!(rgb(&pixels, 14, 20), (255, 0, 0));
     // Without a style, the master's colour applies as before.
     let (pixels, _) = render(&styled("", &text("")).replace("<p:style></p:style>", ""));
+    assert_eq!(rgb(&pixels, 14, 20), (0, 255, 0));
+    // A placeholder keeps its inherited master style (bodyStyle: green) above the reference.
+    let placeholder = styled(DEFAULT_STYLE, &text("")).replace(
+        "<p:nvPr/>",
+        r#"<p:nvPr><p:ph type="body" idx="1"/></p:nvPr>"#,
+    );
+    let (pixels, _) = render(&placeholder);
     assert_eq!(rgb(&pixels, 14, 20), (0, 255, 0));
 }
 
