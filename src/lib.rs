@@ -93,7 +93,7 @@ pub struct SlideReport {
 }
 
 /// Diagnostics when strict mode stops. image names are planned outputs, not written files.
-/// Access through downcast_ref::<StrictModeError>() on the returned anyhow::Error.
+/// Access through `downcast_ref::<StrictModeError>()` on the returned `anyhow::Error`.
 #[derive(Debug)]
 pub struct StrictModeError {
     pub slides: Vec<SlideReport>,
