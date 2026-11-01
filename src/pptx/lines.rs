@@ -10,6 +10,23 @@ pub(super) struct Element {
     children: Vec<Element>,
 }
 impl Element {
+    /// An `a:srgbClr` element.
+    pub(super) fn rgb(hex: &str) -> Self {
+        Self {
+            name: "srgbClr".into(),
+            attrs: BTreeMap::from([("val".into(), hex.into())]),
+            children: vec![],
+        }
+    }
+    pub(super) fn has_children(&self) -> bool {
+        !self.children.is_empty()
+    }
+    pub(super) fn child_names(&self) -> impl Iterator<Item = &str> {
+        self.children.iter().map(|c| c.name.as_str())
+    }
+    pub(super) fn find(&self, name: &str) -> Option<&Element> {
+        self.children.iter().find(|c| c.name == name)
+    }
     pub(super) fn from(node: Node<'_, '_>) -> Self {
         Self {
             name: node.tag_name().name().into(),
@@ -50,7 +67,8 @@ impl Element {
             }
         }
     }
-    fn placeholder(&mut self, color: &Self) {
+    /// Replace every `phClr` scheme colour with `color`, keeping the transforms applied to it.
+    pub(super) fn placeholder(&mut self, color: &Self) {
         if self.name == "schemeClr" && self.attrs.get("val").is_some_and(|v| v == "phClr") {
             let transforms = std::mem::take(&mut self.children);
             *self = color.clone();
@@ -61,7 +79,7 @@ impl Element {
             }
         }
     }
-    fn xml(&self) -> String {
+    pub(super) fn xml(&self) -> String {
         let attrs = self
             .attrs
             .iter()
@@ -107,11 +125,7 @@ pub(super) fn resolve(
                         warnings,
                         "Theme line reference color is missing; using black",
                     );
-                    Element {
-                        name: "srgbClr".into(),
-                        attrs: BTreeMap::from([("val".into(), "000000".into())]),
-                        children: vec![],
-                    }
+                    Element::rgb("000000")
                 });
             line.placeholder(&color);
             resolved = Some(line);

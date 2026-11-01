@@ -25,6 +25,12 @@ fn geometry_matches_libreoffice() {
 }
 
 #[test]
+#[ignore = "Requires LibreOffice and Python dependencies from tests/visual/requirements.txt"]
+fn theme_style_references_match_libreoffice() {
+    compare_fixture("theme-style");
+}
+
+#[test]
 #[ignore = "Requires LibreOffice and Japanese fonts"]
 fn theme_matches_libreoffice() {
     compare_fixture("theme");
