@@ -62,6 +62,10 @@ struct Style {
 struct Glyph {
     ch: char,
     advance: f64,
+    /// Advance along a vertical column from the font's `vmtx`, when it has one.
+    vertical_advance: Option<f64>,
+    /// Drawn upright in an `eaVert` column instead of turned with the line.
+    upright: bool,
     offset: f64,
     compressed: bool,
     ascent: f64,
@@ -218,11 +222,17 @@ fn glyphs(
             // Convert font-unit advances to the measurement size with double precision.
             let advance_scale = measurement_size(style.size) / f64::from(metrics.units_per_em);
             let map = font.charmap();
+            let vmtx = font.vmtx().ok();
             Some(
                 value
                     .chars()
                     .map(|ch| {
-                        let advance = map.map(ch).and_then(|id| gm.advance_width(id));
+                        let id = map.map(ch);
+                        let advance = id.and_then(|id| gm.advance_width(id));
+                        let vertical_advance = id
+                            .zip(vmtx.as_ref())
+                            .and_then(|(id, vmtx)| vmtx.advance(id))
+                            .map(|value| f64::from(value) * advance_scale);
                         if advance.is_none() && ch != '\n' {
                             let fallback = resolver.fallback(
                                 &requested,
@@ -243,6 +253,8 @@ fn glyphs(
                             ch,
                             offset: 0.0,
                             compressed: false,
+                            vertical_advance,
+                            upright: false,
                             advance: advance
                                 .map(|value| f64::from(value) * advance_scale)
                                 .unwrap_or(style.size),
@@ -268,6 +280,8 @@ fn glyphs(
             ch,
             offset: 0.0,
             compressed: false,
+            vertical_advance: None,
+            upright: false,
             advance: style.size,
             ascent: style.size,
             descent: style.size * 0.2,
@@ -518,6 +532,50 @@ fn spacing(node: Option<Node<'_, '_>>, tag: &str, natural: f64, default: f64) ->
         .map(|n| natural * number(n, "val", 100000.0) / 100000.0)
         .unwrap_or(default)
 }
+/// How a character is drawn in an `eaVert` column without the font's vertical forms.
+#[derive(Clone, Copy, PartialEq)]
+enum ColumnForm {
+    /// East Asian characters stand upright.
+    Upright,
+    /// Upright, moved to the upper right of the cell, where the vertical forms of
+    /// these marks sit.
+    UpperRight,
+    /// Turned with the line: Latin text, and brackets, dashes, and the long vowel mark,
+    /// whose vertical forms are their turned shapes.
+    Sideways,
+}
+fn column_form(ch: char) -> ColumnForm {
+    if "、。，．".contains(ch) {
+        ColumnForm::UpperRight
+    } else if !is_east_asian(ch)
+        || "ー－～〜…‥―（）［］｛｝〈〉《》「」『』【】〔〕〖〗〘〙〚〛＝＜＞".contains(ch)
+    {
+        ColumnForm::Sideways
+    } else {
+        ColumnForm::Upright
+    }
+}
+/// Turn East Asian characters upright for an `eaVert` column. Their advance along the
+/// column comes from the font's vertical metrics, or the em size without them.
+fn stand_upright(glyphs: &mut [Glyph], warnings: &mut Warnings) {
+    let mut missing_metrics = false;
+    for glyph in glyphs
+        .iter_mut()
+        .filter(|g| column_form(g.ch) != ColumnForm::Sideways)
+    {
+        glyph.upright = true;
+        glyph.advance = glyph.vertical_advance.unwrap_or_else(|| {
+            missing_metrics = true;
+            measurement_size(glyph.style.size)
+        });
+    }
+    if missing_metrics {
+        warnings.push(
+            Code::Approximation,
+            "Font has no vertical metrics; upright characters in vertical text advance by the em size",
+        );
+    }
+}
 pub(super) struct TextBody<'a> {
     pub body: Node<'a, 'a>,
     pub inherited: Vec<Node<'a, 'a>>,
@@ -644,10 +702,10 @@ fn auto_fit(nodes: &[Node<'_, '_>], warnings: &mut Warnings) -> AutoFit {
     result
 }
 
-/// Quarter turn of rotated vertical text (`a:bodyPr@vert`).
+/// Quarter turn of vertical text (`a:bodyPr@vert`).
 #[derive(Clone, Copy)]
 enum Turn {
-    /// `vert`: horizontal lines turned 90 degrees clockwise.
+    /// `vert` and `eaVert`: horizontal lines turned 90 degrees clockwise.
     Clockwise,
     /// `vert270`: horizontal lines turned 90 degrees counter-clockwise.
     CounterClockwise,
@@ -680,28 +738,44 @@ pub(super) fn render<'a>(
         .chain(source.inherited.iter().copied())
         .filter_map(|n| child(n, A, "bodyPr"))
         .find_map(|n| n.attribute("vert"));
-    let turn = match vert {
-        None | Some("horz") => None,
-        Some("vert") => Some(Turn::Clockwise),
-        Some("vert270") => Some(Turn::CounterClockwise),
-        // eaVert (upright East Asian columns), wordArtVert, and the other modes.
+    // `eaVert` columns are clockwise lines whose East Asian characters stand upright.
+    let (turn, upright) = match vert {
+        None | Some("horz") => (None, false),
+        Some("vert") => (Some(Turn::Clockwise), false),
+        Some("vert270") => (Some(Turn::CounterClockwise), false),
+        Some("eaVert") => (Some(Turn::Clockwise), true),
         Some(_) => {
             warn(warnings, "Vertical text is unsupported");
-            None
+            (None, false)
         }
     };
     let Some(turn) = turn else {
-        return layout(source, w, h, None, theme, options, svg, warnings);
+        return layout(source, w, h, None, false, theme, options, svg, warnings);
     };
-    // Rotated text is horizontal text laid out in the box with its sides swapped and
-    // then turned into place about the box.
+    if upright {
+        warnings.push(
+            Code::Approximation,
+            "Vertical East Asian text turns or shifts horizontal glyphs instead of using the font's vertical forms",
+        );
+    }
+    // Lay the lines out in the box with its sides swapped, then turn them into place.
     svg.push_str(&match turn {
         Turn::Clockwise => format!("<g transform=\"translate({w} 0) rotate(90)\">"),
         Turn::CounterClockwise => format!("<g transform=\"translate(0 {h}) rotate(-90)\">"),
     });
-    layout(source, h, w, Some(turn), theme, options, svg, warnings);
+    layout(
+        source,
+        h,
+        w,
+        Some(turn),
+        upright,
+        theme,
+        options,
+        svg,
+        warnings,
+    );
     svg.push_str("</g>");
-    // Shape autofit is never applied to vertical bodies, so the box keeps its size.
+    // Vertical bodies never autofit, so the box keeps its size.
     TextExtent {
         height: h,
         offset_y: 0.0,
@@ -717,6 +791,7 @@ fn layout(
     w: f64,
     h: f64,
     turn: Option<Turn>,
+    upright: bool,
     theme: &Theme,
     options: &RenderOptions<'_>,
     svg: &mut String,
@@ -910,6 +985,9 @@ fn layout(
                     ));
                 }
             }
+        }
+        if upright {
+            stand_upright(&mut all, warnings);
         }
         // The counter is advanced for every paragraph so numbering stays as before;
         // a text run, including a space-only run, makes the marker visible.
@@ -1158,13 +1236,65 @@ fn layout(
         let mut x = line.x;
         let y = line.baseline + vertical;
         svg.push_str(&format!("<text y=\"{y}\" xml:space=\"preserve\">"));
+        // Upright glyphs are separate elements, each turned back about its own centre.
+        let mut upright = String::new();
+        // Centre of the column across its width: the middle of the line's cell height.
+        let ascent = line.glyphs.iter().map(|g| g.ascent).fold(0.0, f64::max);
+        let descent = line.glyphs.iter().map(|g| g.descent).fold(0.0, f64::max);
+        let column_center = y - (ascent - descent) / 2.0;
 
+        // Advance past a segment, keeping the spacing to a next glyph of the same style
+        // (segments also split where upright and sideways glyphs meet).
+        let advance = |start: usize, end: usize| -> f64 {
+            (start..end)
+                .map(|i| step(&line.glyphs[i], line.glyphs.get(i + 1)))
+                .sum()
+        };
         let mut start = 0;
         while start < line.glyphs.len() {
             let style = &line.glyphs[start].style;
+            let turned_back = line.glyphs[start].upright;
             let mut end = start + 1;
-            while end < line.glyphs.len() && line.glyphs[end].style == *style {
+            while end < line.glyphs.len()
+                && line.glyphs[end].style == *style
+                && line.glyphs[end].upright == turned_back
+            {
                 end += 1;
+            }
+            let font = format!(
+                "font-family=\"{}\" font-size=\"{}\" fill=\"{}\" font-weight=\"{}\" font-style=\"{}\"",
+                escape(&style.face),
+                style.size,
+                style.color,
+                if style.bold { "bold" } else { "normal" },
+                if style.italic { "italic" } else { "normal" }
+            );
+            if turned_back {
+                // Ideographic em box: 0.88 em above and 0.12 em below the baseline, so
+                // its centre is 0.38 em above the baseline.
+                let baseline = column_center + 0.38 * style.size;
+                let mut position = x;
+                for (i, g) in line.glyphs[start..end].iter().enumerate() {
+                    let center = position + g.offset + g.advance / 2.0;
+                    let shift = if column_form(g.ch) == ColumnForm::UpperRight {
+                        format!(" translate({} {})", style.size / 2.0, -style.size / 2.0)
+                    } else {
+                        String::new()
+                    };
+                    upright.push_str(&format!(
+                        "<text x=\"{center}\" y=\"{baseline}\" text-anchor=\"middle\" transform=\"rotate(-90 {center} {column_center}){shift}\" {font}>{}</text>",
+                        escape(&g.ch.to_string())
+                    ));
+                    position += step(
+                        g,
+                        line.glyphs
+                            .get(start + i + 1)
+                            .filter(|_| start + i + 1 < end),
+                    );
+                }
+                x += advance(start, end);
+                start = end;
+                continue;
             }
             let positions = {
                 let mut position = x;
@@ -1185,11 +1315,15 @@ fn layout(
                     .join(" ")
             };
             let value: String = line.glyphs[start..end].iter().map(|g| g.ch).collect();
-            svg.push_str(&format!("<tspan x=\"{positions}\" font-family=\"{}\" font-size=\"{}\" fill=\"{}\" font-weight=\"{}\" font-style=\"{}\">{}</tspan>", escape(&style.face), style.size, style.color, if style.bold {"bold"} else {"normal"}, if style.italic {"italic"} else {"normal"}, escape(&value)));
-            x += text_width(&line.glyphs[start..end]);
+            svg.push_str(&format!(
+                "<tspan x=\"{positions}\" {font}>{}</tspan>",
+                escape(&value)
+            ));
+            x += advance(start, end);
             start = end;
         }
         svg.push_str("</text>");
+        svg.push_str(&upright);
     }
     extent
 }
@@ -1204,6 +1338,8 @@ mod tests {
                 ch,
                 offset: 0.0,
                 compressed: false,
+                vertical_advance: None,
+                upright: false,
                 advance: 10.0,
                 ascent: 8.0,
                 descent: 2.0,
@@ -1962,7 +2098,7 @@ mod tests {
         for (vert, transform, first_x, baseline_shift, warned) in [
             ("vert", "translate(50 0) rotate(90)", 20.0, 0.0, false),
             ("vert270", "translate(0 100) rotate(-90)", 0.0, 10.0, false),
-            ("eaVert", "", 10.0, 20.0, true),
+            ("eaVert", "translate(50 0) rotate(90)", 20.0, 0.0, false),
         ] {
             let source = format!(
                 r#"<a:txBody xmlns:a="{A}"><a:bodyPr vert="{vert}" lIns="95250" tIns="190500" rIns="0" bIns="0"/><a:p><a:r><a:rPr sz="750"/><a:t>AB</a:t></a:r></a:p></a:txBody>"#
@@ -2005,6 +2141,109 @@ mod tests {
                 warned
             );
         }
+    }
+    /// Render an `eaVert` body with zero insets in a 50x100 box without fonts.
+    fn east_asian_vertical(run: &str) -> (String, Warnings) {
+        let source = format!(
+            r#"<a:txBody xmlns:a="{A}"><a:bodyPr vert="eaVert" lIns="0" tIns="0" rIns="0" bIns="0"/><a:p><a:r>{run}</a:r></a:p></a:txBody>"#
+        );
+        let doc = Document::parse(&source).unwrap();
+        let mut svg = String::new();
+        let mut warnings = Warnings::default();
+        render(
+            doc.root_element(),
+            50.0,
+            100.0,
+            &Theme::default(),
+            &RenderOptions {
+                fonts: Resolver::new(&Database::new(), &HashMap::new()),
+                punctuation_compression: false,
+                slide_number: Default::default(),
+            },
+            &mut svg,
+            &mut warnings,
+        );
+        (svg, warnings)
+    }
+    /// Numeric value of `name="..."` in each element that starts with `prefix`.
+    fn attributes(svg: &str, prefix: &str, name: &str) -> Vec<f64> {
+        svg.split(prefix)
+            .skip(1)
+            .map(|rest| {
+                let element = format!("{prefix}{rest}");
+                let value = element.split(&format!(" {name}=\"")).nth(1).unwrap();
+                value.split(['"', ' ']).next().unwrap().parse().unwrap()
+            })
+            .collect()
+    }
+    #[test]
+    fn east_asian_vertical_text_fills_upright_columns_from_right_to_left() {
+        // Fifteen 10px characters (10.08px measured) overflow the 100px column: nine
+        // fit in the first column and six move to the second.
+        let (svg, warnings) =
+            east_asian_vertical(r#"<a:rPr sz="750"/><a:t>あいうえおかきくけこさしすせそ</a:t>"#);
+        // Columns are clockwise lines, so a later line lies further left on the slide.
+        assert!(
+            svg.starts_with("<g transform=\"translate(50 0) rotate(90)\">"),
+            "{svg}"
+        );
+        let upright: Vec<_> = svg.split("<text x=").skip(1).collect();
+        assert_eq!(upright.len(), 15, "{svg}");
+        assert!(
+            upright
+                .iter()
+                .all(|e| e.contains("transform=\"rotate(-90 "))
+        );
+        let baselines = attributes(&svg, "<text x=", "y");
+        assert!(baselines[..9].iter().all(|y| *y == baselines[0]), "{svg}");
+        assert!(baselines[9..].iter().all(|y| *y == baselines[9]), "{svg}");
+        assert!(baselines[9] > baselines[0], "{svg}");
+        let centers = attributes(&svg, "<text x=", "x");
+        assert!(centers[..9].windows(2).all(|w| w[1] > w[0]), "{svg}");
+        assert_eq!(centers[9], centers[0], "{svg}");
+        assert!(
+            !warnings
+                .iter()
+                .any(|w| w.contains("Vertical text is unsupported"))
+        );
+    }
+    #[test]
+    fn east_asian_vertical_text_turns_latin_sideways_and_reports_approximations() {
+        let (svg, warnings) = east_asian_vertical(r#"<a:rPr sz="750"/><a:t>日本ABC</a:t>"#);
+        // Latin runs stay in the turned line; East Asian characters are turned back.
+        assert!(svg.contains(">ABC</tspan>"), "{svg}");
+        assert_eq!(svg.matches("rotate(-90 ").count(), 2, "{svg}");
+        assert!(
+            warnings
+                .iter()
+                .any(|w| w.contains("instead of using the font's vertical forms"))
+        );
+        assert!(
+            warnings
+                .iter()
+                .any(|w| w.contains("Font has no vertical metrics"))
+        );
+        // Without upright characters there are no vertical metrics to miss.
+        let (_, warnings) = east_asian_vertical(r#"<a:rPr sz="750"/><a:t>ABC</a:t>"#);
+        assert!(
+            warnings
+                .iter()
+                .any(|w| w.contains("instead of using the font's vertical forms"))
+        );
+        assert!(
+            !warnings
+                .iter()
+                .any(|w| w.contains("Font has no vertical metrics"))
+        );
+    }
+    #[test]
+    fn east_asian_vertical_text_keeps_spacing_where_orientation_changes() {
+        // spc="750" adds 10px after each character followed by one of the same style.
+        let (svg, _) = east_asian_vertical(r#"<a:rPr sz="750" spc="750"/><a:t>日A</a:t>"#);
+        let center = attributes(&svg, "<text x=", "x")[0];
+        let latin = attributes(&svg, "<tspan x=", "x")[0];
+        // The upright character is centred in its 10.08px advance.
+        assert!((latin - (center - 5.04) - 20.08).abs() < 1e-9, "{svg}");
     }
     #[test]
     fn bullets_and_wrapped_lines_have_separate_starts() {
