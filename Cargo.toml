@@ -7,7 +7,9 @@ license = "MIT"
 repository = "https://github.com/stellar-aiz/rhodopsin"
 
 [features]
-default = ["xlsx"]
+default = ["cli", "xlsx"]
+# The `rhodopsin` binary and `rhodopsin::cli`; library users without it do not compile clap.
+cli = ["dep:clap"]
 # Spreadsheet (.xlsx) to PDF: `rhodopsin::xlsx` and the CLI's .xlsx route. PPTX-only library
 # users can disable default features to leave its dependencies out.
 xlsx = [
@@ -26,12 +28,12 @@ xlsx = [
 [[bin]]
 name = "rhodopsin"
 path = "src/main.rs"
-required-features = ["xlsx"]
+required-features = ["cli", "xlsx"]
 
 [dependencies]
 anyhow = "1"
 base64 = "0.22"
-clap = { version = "4", features = ["derive"] }
+clap = { version = "4", features = ["derive"], optional = true }
 resvg = "0.48.1"
 roxmltree = "0.21"
 imagesize = "0.15"
