@@ -320,3 +320,28 @@ Inspect `report.slides` and the public `DiagnosticCode` enum for diagnostics.
 failures; their `image` values are planned filenames, not existing files.
 Other errors also use `anyhow::Error`. The public API may change during this early
 implementation stage.
+
+### Embedding the CLI
+
+The `cli` feature (on by default) also exposes the command-line interface as
+`rhodopsin::cli::run()` and `rhodopsin::cli::run_from_args(args)`. A dependent crate can build
+the same `rhodopsin` binary from a pinned revision, inside its own `Cargo.lock`:
+
+```toml
+[dependencies]
+rhodopsin = { git = "https://github.com/stellar-aiz/rhodopsin", rev = "<sha>" }
+```
+
+```rust,ignore
+fn main() -> std::process::ExitCode {
+    rhodopsin::cli::run()
+}
+```
+
+Arguments, help and version text, result documents, exit codes, and `manifest.json` are those
+of the upstream binary built from the same revision with the same dependency versions (start
+the wrapper's `Cargo.lock` from this repository's): the `rhodopsin` binary itself is this same
+call. The version is this crate's. `run_from_args` never exits the process,
+so it can also be called in-process. Library users who do not need the CLI can disable default
+features (`cli` leaves out clap, `xlsx` the spreadsheet dependencies) and enable only what
+they use.

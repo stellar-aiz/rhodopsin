@@ -6,6 +6,8 @@
 //! println!("Rendered {} slides", report.slides.len());
 //! # Ok::<(), anyhow::Error>(())
 //! ```
+#[cfg(feature = "cli")]
+pub mod cli;
 mod pdf;
 mod pdf_output;
 mod pptx;

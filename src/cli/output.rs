@@ -1,5 +1,5 @@
 //! CLI result documents. Quote strings using JSON rules, a subset of YAML 1.2.
-use rhodopsin::{FontFallbackError, SlideReport, StrictModeError};
+use crate::{FontFallbackError, SlideReport, StrictModeError};
 use std::{
     collections::{BTreeMap, BTreeSet},
     path::Path,
@@ -60,7 +60,7 @@ pub fn completed(folder: &Path, slides: &[SlideReport]) -> String {
     result
 }
 
-pub fn completed_pdf(report: &rhodopsin::PdfConversionReport) -> String {
+pub fn completed_pdf(report: &crate::PdfConversionReport) -> String {
     let details = serde_json::to_string(report)
         .expect("report serialization")
         .replace('\u{0085}', "\\u0085")

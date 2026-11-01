@@ -3,8 +3,8 @@
 //! The spreadsheet renderer currently behaves as if `--strict` were always set:
 //! unsupported content stops the conversion instead of being approximated with a
 //! warning. Per-element approximate rendering is planned; see docs/xlsx.md.
-use crate::cli_output::quoted;
-use rhodopsin::xlsx::{
+use super::output::quoted;
+use crate::xlsx::{
     ConversionOptions,
     diagnostic::{Category, Failure},
     font_sources::Sources,
@@ -58,7 +58,7 @@ pub fn convert(input: &Path, out: &Path, options: Options) -> Result<String, Str
     // Panic messages may quote workbook content; keep them off stderr.
     std::panic::set_hook(Box::new(|_| {}));
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        rhodopsin::xlsx::convert_with_options(input, out, &Limits::default(), &settings)
+        crate::xlsx::convert_with_options(input, out, &Limits::default(), &settings)
     }));
     match result {
         Ok(Ok(report)) => Ok(completed(out, &report)),
