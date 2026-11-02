@@ -122,6 +122,7 @@ fn 計測結果をpdfの文字位置へ渡せる() {
                 baseline: position.baseline,
                 color: [0; 3],
                 clip: None,
+                advance_unit: None,
             })
         })
         .collect();

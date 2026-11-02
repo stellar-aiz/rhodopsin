@@ -51,6 +51,7 @@ fn run() -> Result<serde_json::Value, &'static str> {
             baseline: 45.0,
             color: [0, 0, 0],
             clip: None,
+            advance_unit: None,
         })],
     };
     let bytes = pdf::render(

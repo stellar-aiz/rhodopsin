@@ -63,6 +63,7 @@ pub struct Text {
     color: [u8; 3],
     clip: BoxRect,
     underline: Option<BoxRect>,
+    advance_unit: Option<f64>,
 }
 impl Text {
     pub fn decoration(&self) -> Option<pdf::graphics::Paint<'static>> {
@@ -80,6 +81,7 @@ impl Text {
             baseline: self.baseline,
             color: self.color,
             clip: Some(self.clip),
+            advance_unit: self.advance_unit,
         }
     }
 }
@@ -383,6 +385,7 @@ pub fn plan(
                     baseline: position.baseline,
                     color,
                     clip: frame.clip,
+                    advance_unit: frame.line_box.map(|line_box| line_box.advance_unit),
                 });
             }
         }
