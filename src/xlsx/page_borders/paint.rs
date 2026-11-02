@@ -16,7 +16,9 @@ pub struct Stroke {
 }
 
 /// 共有辺を整理し、各辺を欠落させず線に変換する。
-/// 線端はPDF既定のbutt、破線位相は0。交点を延長・短縮しない。
+/// 実線は両端を線幅の半分だけ延ばし、交点の角を欠かさない（Excel for Mac 16.105 の PDF と同じ。
+/// docs/history/20261102_xlsx-excel-mac-layout.md）。破線と二重線の線端はPDF既定のbutt、
+/// 破線位相は0で、交点を延長・短縮しない。
 /// 異なる共有辺・部分重複・斜め鎖線の規則は未確定のため拒否する。
 pub fn paint(
     edges: &[Edge],
@@ -65,6 +67,11 @@ pub fn paint(
             };
             from[perpendicular] += offset;
             to[perpendicular] += offset;
+            if stroke.dash.is_empty() && stroke.separation.is_none() {
+                let along = 1 - perpendicular;
+                from[along] -= stroke.width / 2.0;
+                to[along] += stroke.width / 2.0;
+            }
             if from
                 .iter()
                 .chain(&to)
