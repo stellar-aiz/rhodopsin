@@ -187,7 +187,9 @@ fn xlsx_locale_is_ja_jp_by_default_and_rejects_unknown_values_and_pptx_input() {
         (Some("ja-JP"), Some(1)),
         (Some("en-US"), Some(0)),
     ] {
-        let out = dir.path().join(format!("{locale:?}.pdf"));
+        let out = dir
+            .path()
+            .join(format!("{}.pdf", locale.unwrap_or("default")));
         let mut args = vec![
             input.clone().into_os_string(),
             "--format".into(),
