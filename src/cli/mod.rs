@@ -167,8 +167,8 @@ where
             font_file: args.font_file,
             no_system_fonts: args.no_system_fonts,
             locale: match args.locale {
-                Some(Locale::EnUs) => crate::xlsx::format::date::Locale::English,
-                Some(Locale::JaJp) | None => crate::xlsx::format::date::Locale::Japanese,
+                Some(Locale::EnUs) => xlsx::Locale::English,
+                Some(Locale::JaJp) | None => xlsx::Locale::Japanese,
             },
         };
         match xlsx::convert(&args.input, &out, options) {

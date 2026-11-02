@@ -37,15 +37,15 @@ pub struct PageLayout {
 /// その二つのブロックだけを互換分解して統合漢字へ戻し、他の文字は変えない。
 pub fn normalize_radicals(text: &str) -> String {
     use unicode_normalization::UnicodeNormalization;
-    text.chars()
-        .flat_map(|ch| {
-            if ('\u{2E80}'..='\u{2EFF}').contains(&ch) || ('\u{2F00}'..='\u{2FDF}').contains(&ch) {
-                ch.to_string().nfkc().collect::<Vec<_>>()
-            } else {
-                vec![ch]
-            }
-        })
-        .collect()
+    let mut result = String::with_capacity(text.len());
+    for ch in text.chars() {
+        if ('\u{2E80}'..='\u{2EFF}').contains(&ch) || ('\u{2F00}'..='\u{2FDF}').contains(&ch) {
+            result.extend(std::iter::once(ch).nfkc());
+        } else {
+            result.push(ch);
+        }
+    }
+    result
 }
 
 type Matrix = [f64; 6];
@@ -62,26 +62,35 @@ fn multiply(a: &Matrix, b: &Matrix) -> Matrix {
 fn apply(m: &Matrix, x: f64, y: f64) -> (f64, f64) {
     (x * m[0] + y * m[2] + m[4], x * m[1] + y * m[3] + m[5])
 }
-fn numbers(operands: &[Object], count: usize) -> Result<Vec<f64>> {
-    if operands.len() != count {
-        return Err("invalid_content_operands");
+fn number(operand: &Object) -> Result<f64> {
+    match operand {
+        Object::Integer(v) => Ok(*v as f64),
+        Object::Real(v) => Ok(f64::from(*v)),
+        _ => Err("invalid_content_operands"),
     }
-    operands
-        .iter()
-        .map(|o| match o {
-            Object::Integer(v) => Ok(*v as f64),
-            Object::Real(v) => Ok(f64::from(*v)),
-            _ => Err("invalid_content_operands"),
-        })
-        .collect()
 }
-fn rgb(values: &[f64]) -> Result<[u8; 3]> {
-    let level = |v: f64| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
-    match values {
-        [g] => Ok([level(*g); 3]),
-        [r, g, b] => Ok([level(*r), level(*g), level(*b)]),
+fn numbers<const N: usize>(operands: &[Object]) -> Result<[f64; N]> {
+    let operands: &[Object; N] = operands
+        .try_into()
+        .map_err(|_| "invalid_content_operands")?;
+    let mut values = [0.0; N];
+    for (value, operand) in values.iter_mut().zip(operands) {
+        *value = number(operand)?;
+    }
+    Ok(values)
+}
+/// 灰色または RGB の塗り・線の色を 0〜255 に丸める。
+fn rgb(operands: &[Object]) -> Result<[u8; 3]> {
+    let level = |o: &Object| number(o).map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8);
+    match operands {
+        [g] => Ok([level(g)?; 3]),
+        [r, g, b] => Ok([level(r)?, level(g)?, level(b)?]),
         _ => Err("color_space_unobserved"),
     }
+}
+/// 0〜255 の各成分が 1 以内なら同じ色とみなす（色空間の丸めの違い）。
+fn same_color(a: &[u8; 3], b: &[u8; 3]) -> bool {
+    a.iter().zip(b).all(|(a, b)| a.abs_diff(*b) <= 1)
 }
 
 /// 一ページの内容を読む。回転・傾き、位置を確定できない文字表示、未対応の色空間は未観測にする。
@@ -107,7 +116,6 @@ pub fn read(doc: &Document, page: ObjectId, height: f64) -> Result<PageLayout> {
     let (mut tm, mut line, mut positioned) = (identity, identity, false);
     let (mut font, mut size): (Option<Vec<u8>>, f64) = (None, 0.0);
     let mut path: Vec<Vec<(f64, f64)>> = Vec::new();
-    let mut shows = Vec::new();
     let push_rect =
         |layout: &mut PageLayout, color: [u8; 3], x0: f64, y0: f64, x1: f64, y1: f64| {
             let (left, right, top, bottom) = (
@@ -118,22 +126,17 @@ pub fn read(doc: &Document, page: ObjectId, height: f64) -> Result<PageLayout> {
             );
             if (right - left).min(bottom - top) <= RULE_THICKNESS {
                 let horizontal = right - left > bottom - top;
-                layout.rules.push(if horizontal {
-                    Rule {
-                        horizontal,
-                        center: (top + bottom) / 2.0,
-                        thickness: bottom - top,
-                        from: left,
-                        to: right,
-                    }
+                let (center, thickness, from, to) = if horizontal {
+                    ((top + bottom) / 2.0, bottom - top, left, right)
                 } else {
-                    Rule {
-                        horizontal,
-                        center: (left + right) / 2.0,
-                        thickness: right - left,
-                        from: top,
-                        to: bottom,
-                    }
+                    ((left + right) / 2.0, right - left, top, bottom)
+                };
+                layout.rules.push(Rule {
+                    horizontal,
+                    center,
+                    thickness,
+                    from,
+                    to,
                 });
             } else if color != [255; 3] {
                 let area =
@@ -154,20 +157,13 @@ pub fn read(doc: &Document, page: ObjectId, height: f64) -> Result<PageLayout> {
         match operation.operator.as_str() {
             "q" => stack.push((ctm, fill, stroke, width)),
             "Q" => (ctm, fill, stroke, width) = stack.pop().ok_or("unbalanced_graphics_state")?,
-            "cm" => {
-                let m = numbers(operands, 6)?;
-                ctm = multiply(&[m[0], m[1], m[2], m[3], m[4], m[5]], &ctm);
-            }
-            "g" | "rg" | "sc" | "scn" => fill = rgb(&numbers(operands, operands.len())?)?,
-            "G" | "RG" | "SC" | "SCN" => stroke = rgb(&numbers(operands, operands.len())?)?,
-            "cs" | "CS" | "d" | "J" | "j" | "M" | "gs" | "ri" | "i" | "BT" | "ET" | "W" | "W*" => {
-                if operation.operator == "BT" {
-                    (tm, line, positioned) = (identity, identity, true);
-                }
-            }
-            "w" => width = numbers(operands, 1)?[0],
+            "cm" => ctm = multiply(&numbers(operands)?, &ctm),
+            "g" | "rg" | "sc" | "scn" => fill = rgb(operands)?,
+            "G" | "RG" | "SC" | "SCN" => stroke = rgb(operands)?,
+            "BT" => (tm, line, positioned) = (identity, identity, true),
+            "w" => [width] = numbers(operands)?,
             "re" => {
-                let v = numbers(operands, 4)?;
+                let v: [f64; 4] = numbers(operands)?;
                 path.push(
                     vec![
                         (v[0], v[1]),
@@ -181,14 +177,14 @@ pub fn read(doc: &Document, page: ObjectId, height: f64) -> Result<PageLayout> {
                 );
             }
             "m" => {
-                let v = numbers(operands, 2)?;
-                path.push(vec![apply(&ctm, v[0], v[1])]);
+                let [x, y] = numbers(operands)?;
+                path.push(vec![apply(&ctm, x, y)]);
             }
             "l" => {
-                let v = numbers(operands, 2)?;
+                let [x, y] = numbers(operands)?;
                 path.last_mut()
                     .ok_or("invalid_path")?
-                    .push(apply(&ctm, v[0], v[1]));
+                    .push(apply(&ctm, x, y));
             }
             "h" => {}
             "f" | "f*" | "F" => {
@@ -234,16 +230,15 @@ pub fn read(doc: &Document, page: ObjectId, height: f64) -> Result<PageLayout> {
                     return Err("text_font_unresolved");
                 }
                 font = Some(name.to_vec());
-                size = numbers(&operands[1..], 1)?[0];
+                [size] = numbers(&operands[1..])?;
             }
             "Tm" => {
-                let m = numbers(operands, 6)?;
-                tm = [m[0], m[1], m[2], m[3], m[4], m[5]];
+                tm = numbers(operands)?;
                 (line, positioned) = (tm, true);
             }
             "Td" | "TD" => {
-                let v = numbers(operands, 2)?;
-                line = multiply(&[1.0, 0.0, 0.0, 1.0, v[0], v[1]], &line);
+                let [x, y] = numbers(operands)?;
+                line = multiply(&[1.0, 0.0, 0.0, 1.0, x, y], &line);
                 (tm, positioned) = (line, true);
             }
             "Tj" | "TJ" => {
@@ -276,12 +271,14 @@ pub fn read(doc: &Document, page: ObjectId, height: f64) -> Result<PageLayout> {
                 if m[1] != 0.0 || m[2] != 0.0 || m[0] <= 0.0 || m[0] != m[3] {
                     return Err("transformed_text_unobserved");
                 }
-                shows.push(Run {
-                    text: normalize_radicals(&text),
-                    x: m[4],
-                    y: height - m[5],
-                    size: size * m[0],
-                });
+                if !text.trim().is_empty() {
+                    layout.runs.push(Run {
+                        text: normalize_radicals(&text),
+                        x: m[4],
+                        y: height - m[5],
+                        size: size * m[0],
+                    });
+                }
             }
             "'" | "\"" | "T*" | "TL" | "Do" | "BDC" | "BMC" | "sh" | "BI" => {
                 return Err("content_operator_unobserved");
@@ -289,10 +286,6 @@ pub fn read(doc: &Document, page: ObjectId, height: f64) -> Result<PageLayout> {
             _ => {}
         }
     }
-    layout.runs = shows
-        .into_iter()
-        .filter(|show| !show.text.trim().is_empty())
-        .collect();
     Ok(layout)
 }
 
@@ -318,6 +311,26 @@ pub struct Comparison {
     pub unmatched_area_colors: usize,
     pub max_area_delta_pt: f64,
     pub exceeded: Vec<Exceeded>,
+}
+
+/// 線の中心線を 0.5 pt おきに調べ、相手側のいずれかの線（向きを問わない）を TOLERANCE だけ
+/// 広げた矩形に入るか。交点では縦横どちらの線で覆われてもよい。
+fn covered(rule: &Rule, others: &[Rule]) -> bool {
+    let inside = |along: f64| {
+        let (x, y) = if rule.horizontal {
+            (along, rule.center)
+        } else {
+            (rule.center, along)
+        };
+        others.iter().any(|r| {
+            let half = r.thickness / 2.0 + TOLERANCE;
+            let (across, along) = if r.horizontal { (y, x) } else { (x, y) };
+            (r.center - half..=r.center + half).contains(&across)
+                && (r.from - TOLERANCE..=r.to + TOLERANCE).contains(&along)
+        })
+    };
+    let steps = ((rule.to - rule.from) / 0.5).ceil().max(1.0) as usize;
+    (0..=steps).all(|i| inside((rule.from + i as f64 * 0.5).min(rule.to)))
 }
 
 fn round(v: f64) -> f64 {
@@ -382,93 +395,53 @@ pub fn compare(reference: &[PageLayout], candidate: &[PageLayout]) -> Comparison
             }
         }
         result.unmatched_candidate_runs += used.iter().filter(|u| !**u).count();
-        for (forward, (from, to)) in [(true, (expected, actual)), (false, (actual, expected))] {
-            for (order, rule) in from.rules.iter().enumerate() {
-                let near: Vec<_> = to
-                    .rules
-                    .iter()
-                    .filter(|r| {
-                        r.horizontal == rule.horizontal
-                            && (r.center - rule.center).abs() <= TOLERANCE
-                            && (r.thickness - rule.thickness).abs() <= TOLERANCE
-                    })
-                    .collect();
-                // 線の中心線を 0.5 pt おきに調べ、相手側のいずれかの線（向きを問わない）を
-                // TOLERANCE だけ広げた矩形に入るか。交点では縦横どちらの線で覆われてもよい。
-                let inside = |along: f64, across: f64| {
-                    to.rules.iter().any(|r| {
-                        let (x, y) = if rule.horizontal {
-                            (along, across)
-                        } else {
-                            (across, along)
-                        };
-                        let half = r.thickness / 2.0 + TOLERANCE;
-                        let (x0, x1, y0, y1) = if r.horizontal {
-                            (
-                                r.from - TOLERANCE,
-                                r.to + TOLERANCE,
-                                r.center - half,
-                                r.center + half,
-                            )
-                        } else {
-                            (
-                                r.center - half,
-                                r.center + half,
-                                r.from - TOLERANCE,
-                                r.to + TOLERANCE,
-                            )
-                        };
-                        (x0..=x1).contains(&x) && (y0..=y1).contains(&y)
-                    })
-                };
-                let steps = ((rule.to - rule.from) / 0.5).ceil().max(1.0) as usize;
-                let covered = (0..=steps)
-                    .all(|i| inside((rule.from + i as f64 * 0.5).min(rule.to), rule.center));
-                if forward {
-                    result.rules_compared += 1;
-                }
-                if !covered {
-                    result.uncovered_rules += 1;
-                    result.exceeded.push(Exceeded {
-                        page,
-                        kind: if forward {
-                            "rule_missing"
-                        } else {
-                            "rule_extra"
-                        },
-                        index: order,
-                        delta_pt: 0.0,
-                    });
-                    continue;
-                }
-                if forward {
-                    let delta = near
-                        .iter()
-                        .map(|r| {
-                            (r.center - rule.center)
-                                .abs()
-                                .max((r.thickness - rule.thickness).abs())
-                        })
-                        .fold(f64::MAX, f64::min);
-                    // near は中心と太さが TOLERANCE 以内の線だけなので、空なら対応する線が無い。
-                    if near.is_empty() {
-                        result.exceeded.push(Exceeded {
-                            page,
-                            kind: "rule_unmatched",
-                            index: order,
-                            delta_pt: 0.0,
-                        });
-                    } else {
-                        result.max_rule_delta_pt = result.max_rule_delta_pt.max(round(delta));
-                    }
-                }
+        for (order, rule) in expected.rules.iter().enumerate() {
+            result.rules_compared += 1;
+            if !covered(rule, &actual.rules) {
+                result.uncovered_rules += 1;
+                result.exceeded.push(Exceeded {
+                    page,
+                    kind: "rule_missing",
+                    index: order,
+                    delta_pt: 0.0,
+                });
+                continue;
+            }
+            // 中心と太さが TOLERANCE 以内の線が無ければ、覆われていても対応する線が無い。
+            let delta = actual
+                .rules
+                .iter()
+                .filter(|r| r.horizontal == rule.horizontal)
+                .map(|r| {
+                    (r.center - rule.center)
+                        .abs()
+                        .max((r.thickness - rule.thickness).abs())
+                })
+                .fold(f64::MAX, f64::min);
+            if delta > TOLERANCE {
+                result.exceeded.push(Exceeded {
+                    page,
+                    kind: "rule_unmatched",
+                    index: order,
+                    delta_pt: 0.0,
+                });
+            } else {
+                result.max_rule_delta_pt = result.max_rule_delta_pt.max(round(delta));
+            }
+        }
+        for (order, rule) in actual.rules.iter().enumerate() {
+            if !covered(rule, &expected.rules) {
+                result.uncovered_rules += 1;
+                result.exceeded.push(Exceeded {
+                    page,
+                    kind: "rule_extra",
+                    index: order,
+                    delta_pt: 0.0,
+                });
             }
         }
         for (order, (color, area)) in expected.areas.iter().enumerate() {
-            let near = actual
-                .areas
-                .iter()
-                .find(|(c, _)| c.iter().zip(color.iter()).all(|(a, b)| a.abs_diff(*b) <= 1));
+            let near = actual.areas.iter().find(|(c, _)| same_color(c, color));
             let Some((_, found)) = near else {
                 result.unmatched_area_colors += 1;
                 result.exceeded.push(Exceeded {
@@ -498,12 +471,7 @@ pub fn compare(reference: &[PageLayout], candidate: &[PageLayout]) -> Comparison
         result.unmatched_area_colors += actual
             .areas
             .keys()
-            .filter(|c| {
-                !expected
-                    .areas
-                    .keys()
-                    .any(|e| e.iter().zip(c.iter()).all(|(a, b)| a.abs_diff(*b) <= 1))
-            })
+            .filter(|c| !expected.areas.keys().any(|e| same_color(e, c)))
             .count();
     }
     result.matches = reference.len() == candidate.len()

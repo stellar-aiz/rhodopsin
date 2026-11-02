@@ -242,19 +242,12 @@ pub fn position_line_in_box(
 
 /// 各字形の送り幅を unit の整数倍へ丸め、後続の run と行の送り幅を詰め直す。
 pub fn snap_advances(line: &mut Line, unit: f64) -> Result<()> {
-    if !unit.is_finite() || unit <= 0.0 {
-        return Err(layout_error("invalid_advance_unit"));
-    }
     let mut shift = 0.0;
     for run in &mut line.runs {
         run.x += shift;
-        let mut advance = 0.0;
-        for glyph in &mut run.shaped.glyphs {
-            glyph.advance_x = (glyph.advance_x / unit).round() * unit;
-            advance += glyph.advance_x;
-        }
-        shift += advance - run.shaped.advance;
-        run.shaped.advance = advance;
+        let before = run.shaped.advance;
+        run.shaped.snap_advances(unit)?;
+        shift += run.shaped.advance - before;
     }
     line.advance += shift;
     if !line.advance.is_finite() || line.advance < 0.0 {

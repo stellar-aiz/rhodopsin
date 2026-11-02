@@ -43,14 +43,13 @@ pub struct Frame {
     pub line_box: Option<LineBox>,
 }
 
-/// 一行の文字を置く行箱と字送りの格子。値は倍率適用済みのポイント。
+/// 一行の文字を置く行箱。値は倍率適用済みのポイント。
 /// 縦揃えは行箱を内容矩形の上端・中央・下端に置き、ベースラインは行箱の上端から測る。
+/// 行箱のある文字は、各字形の送り幅を倍率適用前の 1 ポイント（frame.scale）の整数倍へ丸める。
 #[derive(Clone, Copy, Debug)]
 pub struct LineBox {
     pub height: f64,
     pub baseline: f64,
-    /// 各字形の送り幅をこの単位の整数倍へ丸める。
-    pub advance_unit: f64,
 }
 
 pub struct Text {
@@ -313,10 +312,10 @@ pub fn plan(
             return Err(Failure::unsupported("automatic_text_wrap"));
         }
         let mut lines = lines;
-        if let Some(line_box) = frame.line_box {
+        if frame.line_box.is_some() {
             match lines.as_mut_slice() {
                 [] => {}
-                [line] => snap_advances(line, line_box.advance_unit)?,
+                [line] => snap_advances(line, frame.scale)?,
                 _ => return Err(Failure::unsupported("cell_line_spacing_unresolved")),
             }
         }
@@ -385,7 +384,7 @@ pub fn plan(
                     baseline: position.baseline,
                     color,
                     clip: frame.clip,
-                    advance_unit: frame.line_box.map(|line_box| line_box.advance_unit),
+                    advance_unit: frame.line_box.map(|_| frame.scale),
                 });
             }
         }

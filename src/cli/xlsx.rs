@@ -4,6 +4,7 @@
 //! unsupported content stops the conversion instead of being approximated with a
 //! warning. Per-element approximate rendering is planned; see docs/xlsx.md.
 use super::output::quoted;
+pub use crate::xlsx::format::date::Locale;
 use crate::xlsx::{
     ConversionOptions,
     diagnostic::{Category, Failure},
@@ -17,7 +18,7 @@ use std::path::{Path, PathBuf};
 pub struct Options {
     pub font_file: Vec<PathBuf>,
     pub no_system_fonts: bool,
-    pub locale: crate::xlsx::format::date::Locale,
+    pub locale: Locale,
 }
 
 /// Whether the input is a spreadsheet. `.xls` and `.xlsm` are routed here too, so the

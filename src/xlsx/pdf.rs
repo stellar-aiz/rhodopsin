@@ -158,12 +158,7 @@ pub fn render(
                 .ok_or_else(|| Failure::input("invalid_pdf_font_index"))?;
             let mut run = font.shape_run(text.text, text.points, font_limits)?;
             if let Some(unit) = text.advance_unit {
-                if !unit.is_finite() || unit <= 0.0 {
-                    return Err(Failure::input("invalid_advance_unit"));
-                }
-                for glyph in &mut run.glyphs {
-                    glyph.advance_x = (glyph.advance_x / unit).round() * unit;
-                }
+                run.snap_advances(unit)?;
             }
             count = count
                 .checked_add(run.glyphs.len())
