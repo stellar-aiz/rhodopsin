@@ -343,9 +343,8 @@ pub fn compare(reference: &[PageLayout], candidate: &[PageLayout]) -> Comparison
                     continue;
                 }
                 let mut text = String::new();
-                for end in start..actual.runs.len() {
-                    let next = &actual.runs[end];
-                    if used[end] || (next.y - first.y).abs() > 0.01 {
+                for (end, (next, taken)) in actual.runs.iter().zip(&used).enumerate().skip(start) {
+                    if *taken || (next.y - first.y).abs() > 0.01 {
                         break;
                     }
                     text.push_str(&compact(&next.text));
