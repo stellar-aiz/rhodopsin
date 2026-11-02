@@ -63,6 +63,7 @@ fn frame(width: f64) -> Frame {
         clip: rect,
         scale: 1.0,
         baseline_step: None,
+        line_box: None,
     }
 }
 fn fonts() -> FontBook {
@@ -290,6 +291,7 @@ fn 保存サイズの範囲外になる印刷倍率もpdfへ反映する() {
             clip: rect,
             scale,
             baseline_step: None,
+            line_box: None,
         };
         let mut warnings = Warnings::default();
         let texts = cell_text::plan(&cell(), 1, frame, &context, &mut warnings).unwrap();
@@ -443,6 +445,7 @@ fn 可視セルをページ順に配置し警告をまとめる() {
                 clip: placement.rect,
                 scale: page.scale,
                 baseline_step: None,
+                line_box: None,
             })
         },
     )
@@ -479,6 +482,7 @@ fn ページ途中の失敗で警告を部分的に確定しない() {
                 clip: placement.rect,
                 scale: page.scale,
                 baseline_step: None,
+                line_box: None,
             })
         },
     );
@@ -617,6 +621,7 @@ fn 結合範囲全体へ左上セルの文字を一度だけ配置する() {
                 clip: placement.rect,
                 scale: page.scale,
                 baseline_step: None,
+                line_box: None,
             })
         },
     )
@@ -990,6 +995,7 @@ fn ページ文字量を各セル追加時に検査し後続セルと警告確�
                     clip: placement.rect,
                     scale: page.scale,
                     baseline_step: None,
+                    line_box: None,
                 })
             },
         );
@@ -1040,6 +1046,7 @@ fn ページ文字量は文字数ではなく生成utf8バイト数で数える(
                     clip: placement.rect,
                     scale: page.scale,
                     baseline_step: None,
+                    line_box: None,
                 })
             },
         )

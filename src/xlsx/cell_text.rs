@@ -8,7 +8,7 @@ use crate::xlsx::{
     styles::{Horizontal, Styles, Underline},
     text_layout::{
         horizontal_for_value, measure, measure_fixed_number, measure_lines, measure_wrapped,
-        position_line, position_lines,
+        position_line, position_line_in_box, position_lines, snap_advances,
     },
     theme::{TextScript, resolve_font},
     warnings::{Kind, Warnings},
@@ -39,6 +39,18 @@ pub struct Frame {
     pub scale: f64,
     /// 複数行の場合に必要な、倍率適用済みのベースライン間隔（ポイント）。
     pub baseline_step: Option<f64>,
+    /// 一行の文字を置く行箱。None なら内容矩形とフォントの ascender/descender で置く。
+    pub line_box: Option<LineBox>,
+}
+
+/// 一行の文字を置く行箱と字送りの格子。値は倍率適用済みのポイント。
+/// 縦揃えは行箱を内容矩形の上端・中央・下端に置き、ベースラインは行箱の上端から測る。
+#[derive(Clone, Copy, Debug)]
+pub struct LineBox {
+    pub height: f64,
+    pub baseline: f64,
+    /// 各字形の送り幅をこの単位の整数倍へ丸める。
+    pub advance_unit: f64,
 }
 
 pub struct Text {
@@ -167,6 +179,10 @@ pub fn plan(
             indent_substituted = selection.substituted;
         }
         if let CellValue::RichText(runs) = &cell.value {
+            // 書式の異なる run を一つの行箱へ置く規則は測っていない。
+            if frame.line_box.is_some() {
+                return Err(Failure::unsupported("rich_text_line_box"));
+            }
             let (texts, substituted) = rich::plan(runs, style, &frame, content, context)?;
             return Ok((texts, false, substituted || indent_substituted));
         }
@@ -294,6 +310,14 @@ pub fn plan(
         if style.alignment.wrap && lines.iter().any(|line| line.overflow) {
             return Err(Failure::unsupported("automatic_text_wrap"));
         }
+        let mut lines = lines;
+        if let Some(line_box) = frame.line_box {
+            match lines.as_mut_slice() {
+                [] => {}
+                [line] => snap_advances(line, line_box.advance_unit)?,
+                _ => return Err(Failure::unsupported("cell_line_spacing_unresolved")),
+            }
+        }
         let Some(first) = lines.iter().flat_map(|line| &line.runs).next() else {
             return Ok((Vec::new(), hashes, false));
         };
@@ -311,14 +335,24 @@ pub fn plan(
                     .ok_or_else(|| Failure::unsupported("cell_line_spacing_unresolved"))?,
             )?
         } else {
-            vec![position_line(
-                &lines[0],
-                content,
-                horizontal,
-                style.alignment.vertical,
-                first.shaped.ascender,
-                first.shaped.descender,
-            )?]
+            vec![match frame.line_box {
+                Some(line_box) => position_line_in_box(
+                    &lines[0],
+                    content,
+                    horizontal,
+                    style.alignment.vertical,
+                    line_box.height,
+                    line_box.baseline,
+                )?,
+                None => position_line(
+                    &lines[0],
+                    content,
+                    horizontal,
+                    style.alignment.vertical,
+                    first.shaped.ascender,
+                    first.shaped.descender,
+                )?,
+            }]
         };
         let mut result = Vec::new();
         for (line, position) in lines.into_iter().zip(positions) {

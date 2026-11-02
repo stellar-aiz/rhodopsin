@@ -76,7 +76,9 @@ fn 標準書体の数字幅で可視シートを順番に分割する() {
             .collect::<Vec<_>>(),
         [1, 3]
     );
-    let expected = prepared.fonts.faces[0].maximum_digit_width(20.0).unwrap() * 96.0 / 72.0;
+    // Excel は数字最大幅を整数ピクセルへ丸める。
+    let expected =
+        (prepared.fonts.faces[0].maximum_digit_width(20.0).unwrap() * 96.0 / 72.0).round();
     assert_eq!(result.column_metrics.maximum_digit_width_pixels, expected);
     assert!(!result.column_metrics.substituted);
     assert_eq!(result.pages[0].scale, 0.5);
@@ -245,6 +247,7 @@ fn 全可視シートを画像と文字を含む単一pdfへ接続する() {
                         clip: placement.rect,
                         scale: page.scale,
                         baseline_step: None,
+                        line_box: None,
                     })
                 },
             )
@@ -315,6 +318,7 @@ fn ブック全体の描画量を制限し後続ページの失敗を返す() {
                 clip: placement.rect,
                 scale: page.scale,
                 baseline_step: None,
+                line_box: None,
             })
         },
     );
@@ -336,6 +340,7 @@ fn ブック全体の描画量を制限し後続ページの失敗を返す() {
                 clip: placement.rect,
                 scale: page.scale,
                 baseline_step: None,
+                line_box: None,
             })
         },
     );
@@ -366,6 +371,7 @@ fn 成功レポートの書体を実際のpdf埋め込みと照合する() {
                     clip: placement.rect,
                     scale: page.scale,
                     baseline_step: None,
+                    line_box: None,
                 })
             },
         )
@@ -501,6 +507,7 @@ fn pdf層の小さい文字量上限もページ組版へ先に渡す() {
                 clip: placement.rect,
                 scale: page.scale,
                 baseline_step: None,
+                line_box: None,
             })
         },
     );
@@ -541,6 +548,7 @@ fn ブック組版は列幅と字下げへ同じ標準文字体系を渡す() {
                     clip: placement.rect,
                     scale: page.scale,
                     baseline_step: None,
+                    line_box: None,
                 })
             },
         )
@@ -569,6 +577,7 @@ fn ブック組版では隣接セルに応じた文字の可視範囲をpdfへ�
                         clip: placement.rect,
                         scale: page.scale,
                         baseline_step: None,
+                        line_box: None,
                     })
                 },
             )
@@ -660,6 +669,7 @@ fn ブック描画が複数書式の抽出と全使用書体のレポートを�
                         clip: placement.rect,
                         scale: page.scale,
                         baseline_step: None,
+                        line_box: None,
                     })
                 },
             )
@@ -737,6 +747,7 @@ fn 複数書式と標準数値と小数画像切り取りを同じレポート�
                     clip: placement.rect,
                     scale: page.scale,
                     baseline_step: None,
+                    line_box: None,
                 })
             },
         )
@@ -809,6 +820,7 @@ fn 全ページの罫線を明示規則で描画しpdfの幅と破線を照合�
                     clip: placement.rect,
                     scale: page.scale,
                     baseline_step: None,
+                    line_box: None,
                 })
             },
             |_, page, edge| {

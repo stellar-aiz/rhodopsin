@@ -17,6 +17,7 @@ use std::path::{Path, PathBuf};
 pub struct Options {
     pub font_file: Vec<PathBuf>,
     pub no_system_fonts: bool,
+    pub locale: crate::xlsx::format::date::Locale,
 }
 
 /// Whether the input is a spreadsheet. `.xls` and `.xlsm` are routed here too, so the
@@ -39,7 +40,7 @@ pub fn unsupported_format() -> String {
 /// Only the option name is echoed, never its value.
 pub fn unsupported_option(option: &str) -> String {
     format!(
-        "status: failed\noutput:\n  created: false\nerrors:\n  - code: OPTION_NOT_SUPPORTED\n    option: {}\n    message: This option is not available for XLSX input yet.\n    suggestion: Remove the option. XLSX input accepts --format pdf, --out, --font-file, --no-system-fonts, and --strict.\n",
+        "status: failed\noutput:\n  created: false\nerrors:\n  - code: OPTION_NOT_SUPPORTED\n    option: {}\n    message: This option is not available for XLSX input yet.\n    suggestion: Remove the option. XLSX input accepts --format pdf, --out, --font-file, --no-system-fonts, --strict, and --locale.\n",
         quoted(option)
     )
 }
@@ -53,6 +54,7 @@ pub fn convert(input: &Path, out: &Path, options: Options) -> Result<String, Str
             directories: Vec::new(),
         },
         system_fonts: !options.no_system_fonts,
+        locale: options.locale,
         ..Default::default()
     };
     // Panic messages may quote workbook content; keep them off stderr.
@@ -88,10 +90,6 @@ fn failed(failure: &Failure) -> String {
         Category::InvalidInput => (
             "INVALID_INPUT",
             "Check that the input is an unencrypted .xlsx workbook with saved formula results and that the output path is unused.",
-        ),
-        Category::UnsupportedFeature if failure.reason == "rendering_not_implemented" => (
-            "UNSUPPORTED_FEATURE",
-            "XLSX rendering is not connected end to end yet; this version cannot convert any workbook.",
         ),
         Category::UnsupportedFeature => (
             "UNSUPPORTED_FEATURE",
@@ -141,10 +139,10 @@ mod tests {
         );
         assert!(text.contains("    location:\n      sheet: 2\n      cell: \"B7\"\n"));
         assert!(text.contains("    suggestion: "));
-        let without = failed(&Failure::unsupported("rendering_not_implemented"));
+        let without = failed(&Failure::unsupported("cell_layout_unmeasured"));
         assert!(!without.contains("location:"));
         assert!(without.contains("code: UNSUPPORTED_FEATURE"));
-        assert!(without.contains("not connected end to end"));
+        assert!(without.contains("see docs/xlsx.md"));
     }
 
     #[test]

@@ -457,7 +457,7 @@ fn 明示したフォントを読み込んで準備段へ渡す() {
     let output = dir.path().join("out.pdf");
     let error = rhodopsin::xlsx::convert_with_options(&path, &output, &Limits::default(), &options)
         .unwrap_err();
-    assert_eq!(error.reason, "rendering_not_implemented");
+    assert_eq!(error.reason, "cell_styles_unresolved");
     assert!(!output.exists());
 }
 #[test]
@@ -565,6 +565,7 @@ fn 変換設定の書体代用を準備済み入力からセル描画と警告�
                 clip: rect,
                 scale: 1.0,
                 baseline_step: None,
+                line_box: None,
             },
             &context,
             &mut warnings,
@@ -591,7 +592,7 @@ fn 代用書体オプションを検証し値を診断へ漏らさない() {
     let path = fixture(&dir, "<sheetData/>");
     let output = dir.path().join("out.pdf");
     for (name, reason, code) in [
-        ("明示した代用書体", "rendering_not_implemented", 3),
+        ("明示した代用書体", "cell_styles_unresolved", 3),
         ("機密\n書体", "invalid_fallback_font", 2),
         (" ", "invalid_fallback_font", 2),
     ] {
@@ -654,6 +655,7 @@ fn xlsx入力から準備組版pdf生成と排他的保存まで接続する() {
             clip: placement.rect,
             scale: page.scale,
             baseline_step: None,
+            line_box: None,
         })
     };
     let convert = |output: &Path| {

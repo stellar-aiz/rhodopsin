@@ -178,23 +178,43 @@ pub fn position_line(
     ascender: f64,
     descender: f64,
 ) -> Result<LinePosition> {
+    if !ascender.is_finite()
+        || !descender.is_finite()
+        || ascender < 0.0
+        || descender > 0.0
+        || ascender <= descender
+    {
+        return Err(layout_error("invalid_line_geometry"));
+    }
+    let height = ascender - descender;
+    position_line_in_box(line, content, horizontal, vertical, height, ascender)
+}
+
+/// 行箱を内容矩形の上端・中央・下端に置き、行箱の上端から baseline の位置を返す。
+pub fn position_line_in_box(
+    line: &Line,
+    content: BoxRect,
+    horizontal: Horizontal,
+    vertical: Vertical,
+    height: f64,
+    baseline: f64,
+) -> Result<LinePosition> {
     if [
         content.x,
         content.y,
         content.width,
         content.height,
         line.advance,
-        ascender,
-        descender,
+        height,
+        baseline,
     ]
     .iter()
     .any(|n| !n.is_finite())
         || content.width < 0.0
         || content.height < 0.0
         || line.advance < 0.0
-        || ascender < 0.0
-        || descender > 0.0
-        || ascender <= descender
+        || height <= 0.0
+        || !(0.0..=height).contains(&baseline)
     {
         return Err(layout_error("invalid_line_geometry"));
     }
@@ -207,16 +227,40 @@ pub fn position_line(
             _ => return Err(Failure::unsupported("horizontal_text_layout")),
         };
     let baseline = content.y
+        + baseline
         + match vertical {
-            Vertical::Top => ascender,
-            Vertical::Center => (content.height - (ascender - descender)) / 2.0 + ascender,
-            Vertical::Bottom => content.height + descender,
+            Vertical::Top => 0.0,
+            Vertical::Center => (content.height - height) / 2.0,
+            Vertical::Bottom => content.height - height,
             _ => return Err(Failure::unsupported("vertical_text_layout")),
         };
     if !x.is_finite() || !baseline.is_finite() {
         return Err(layout_error("invalid_line_geometry"));
     }
     Ok(LinePosition { x, baseline })
+}
+
+/// 各字形の送り幅を unit の整数倍へ丸め、後続の run と行の送り幅を詰め直す。
+pub fn snap_advances(line: &mut Line, unit: f64) -> Result<()> {
+    if !unit.is_finite() || unit <= 0.0 {
+        return Err(layout_error("invalid_advance_unit"));
+    }
+    let mut shift = 0.0;
+    for run in &mut line.runs {
+        run.x += shift;
+        let mut advance = 0.0;
+        for glyph in &mut run.shaped.glyphs {
+            glyph.advance_x = (glyph.advance_x / unit).round() * unit;
+            advance += glyph.advance_x;
+        }
+        shift += advance - run.shaped.advance;
+        run.shaped.advance = advance;
+    }
+    line.advance += shift;
+    if !line.advance.is_finite() || line.advance < 0.0 {
+        return Err(layout_error("invalid_line_geometry"));
+    }
+    Ok(())
 }
 fn layout_error(reason: &'static str) -> Failure {
     Failure::new(Category::LayoutFailure, reason)
