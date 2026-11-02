@@ -218,6 +218,59 @@ fn 一行の左右中央と上下中央を内容矩形へ配置する() {
 }
 
 #[test]
+fn 行箱へ一行を置き字送りを格子へ丸める() {
+    use rhodopsin::xlsx::{
+        pdf::graphics::BoxRect,
+        styles::{Horizontal, Vertical},
+        text_layout::{position_line_in_box, snap_advances},
+    };
+    let book = fonts();
+    let display = DisplayValue {
+        fragments: vec![Fragment::Text("AB".into())],
+        color: None,
+    };
+    // 試験書体の字送りは 0.6 em。9 pt では 5.4 pt。
+    for (unit, advance) in [(1.0, 10.0), (0.5, 11.0)] {
+        let mut line =
+            measure(&display, &book.faces[0], 9.0, 50.0, &FontLimits::default()).unwrap();
+        snap_advances(&mut line, unit).unwrap();
+        assert_eq!(line.advance, advance);
+        assert_eq!(line.runs[0].shaped.advance, advance);
+    }
+    let mut line = measure(&display, &book.faces[0], 9.0, 50.0, &FontLimits::default()).unwrap();
+    snap_advances(&mut line, 1.0).unwrap();
+    let content = BoxRect {
+        x: 10.0,
+        y: 20.0,
+        width: 50.0,
+        height: 30.0,
+    };
+    for (vertical, baseline) in [
+        (Vertical::Top, 34.0),
+        (Vertical::Center, 39.5),
+        (Vertical::Bottom, 45.0),
+    ] {
+        let position =
+            position_line_in_box(&line, content, Horizontal::Right, vertical, 19.0, 14.0).unwrap();
+        assert_eq!((position.x, position.baseline), (50.0, baseline));
+    }
+    for (height, baseline) in [(0.0, 0.0), (19.0, 20.0), (19.0, -1.0)] {
+        assert!(
+            position_line_in_box(
+                &line,
+                content,
+                Horizontal::Left,
+                Vertical::Top,
+                height,
+                baseline
+            )
+            .is_err()
+        );
+    }
+    assert!(snap_advances(&mut line, 0.0).is_err());
+}
+
+#[test]
 fn 標準配置をキャッシュの型で解決する() {
     use rhodopsin::xlsx::{
         styles::Horizontal, text_layout::horizontal_for_value, workbook::CellValue,
