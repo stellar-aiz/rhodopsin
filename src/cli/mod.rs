@@ -17,6 +17,15 @@ enum Format {
     Pdf,
 }
 
+/// Locale for XLSX number and date formats.
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum Locale {
+    #[value(name = "ja-JP")]
+    JaJp,
+    #[value(name = "en-US")]
+    EnUs,
+}
+
 #[derive(Parser)]
 #[command(
     version,
@@ -24,7 +33,7 @@ enum Format {
     after_help = "Fonts: system fonts are loaded by default; application bundles and inaccessible paths may not be searched. Add available font files with --font-file.
 Individual missing glyphs use available fallback fonts with warnings; unrenderable glyphs fail. Family substitution requires --font-fallback.
 Results: YAML on stdout for success, stderr for failure. PNG diagnostics are saved in manifest.json; PDF diagnostics are included in the result document.
-XLSX: .xlsx input is converted to PDF only and always stops on unsupported content (as with --strict). Supported options: --out, --font-file, --no-system-fonts, --strict. Rendering is not complete yet."
+XLSX: .xlsx input is converted to PDF only and always stops on unsupported content (as with --strict). Supported options: --out, --font-file, --no-system-fonts, --strict, --locale. Only the layout measured against Excel for Mac is rendered (cells in Noto Sans JP, 6-40 pt); see docs/xlsx.md."
 )]
 struct Args {
     /// Input PPTX, or XLSX workbook (PDF only)
@@ -59,6 +68,9 @@ struct Args {
     /// Requested=Replacement font mapping (repeatable; one step only)
     #[arg(long, value_parser = parse_font_mapping)]
     font_map: Vec<(String, String)>,
+    /// Locale for number and date formats of XLSX input [default: ja-JP]
+    #[arg(long, value_enum)]
+    locale: Option<Locale>,
 }
 
 fn parse_font_mapping(value: &str) -> std::result::Result<(String, String), String> {
@@ -154,6 +166,10 @@ where
         let options = xlsx::Options {
             font_file: args.font_file,
             no_system_fonts: args.no_system_fonts,
+            locale: match args.locale {
+                Some(Locale::EnUs) => xlsx::Locale::English,
+                Some(Locale::JaJp) | None => xlsx::Locale::Japanese,
+            },
         };
         match xlsx::convert(&args.input, &out, options) {
             Ok(document) => print!("{document}"),
@@ -163,6 +179,13 @@ where
             }
         }
         return ExitCode::SUCCESS;
+    }
+    if args.locale.is_some() {
+        eprint!(
+            "{}",
+            output::invalid_arguments("--locale applies to XLSX input only.")
+        );
+        return ExitCode::from(2);
     }
     let existed = out.exists();
     let settings = ConvertOptions {

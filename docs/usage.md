@@ -95,12 +95,13 @@ service. Check representative text, numbers, and tables in the consuming service
 ## XLSX input
 
 `.xlsx` workbooks use the same command and are converted to PDF only.
-The spreadsheet renderer is not connected end to end yet, so no workbook is converted: unsupported content and invalid input are reported with their own reason codes, and a workbook that passes validation and font loading stops with `UNSUPPORTED_FEATURE` / `rendering_not_implemented`.
+Workbooks inside the layout measured against Excel for Mac are converted: every printed cell font and the Normal style are Noto Sans JP, Normal is 11 pt, cell sizes are whole points from 6 to 40, and text fits on one line. Anything else, unsupported content, and invalid input stop with their own reason codes and a location (`cell_layout_unmeasured` for a font or size outside the measurement).
 Its design rules and open items are in [xlsx.md](xlsx.md).
 
 ```sh
 rhodopsin book.xlsx --format pdf
-rhodopsin book.xlsx --format pdf --out printed.pdf --font-file /path/to/font.ttf
+rhodopsin book.xlsx --format pdf --out printed.pdf --font-file NotoSansJP-Regular.ttf --font-file NotoSansJP-Bold.ttf
+rhodopsin book.xlsx --format pdf --locale en-US
 ```
 
 | Option | XLSX input |
@@ -109,6 +110,7 @@ rhodopsin book.xlsx --format pdf --out printed.pdf --font-file /path/to/font.ttf
 | `--font-file` | Supported; repeatable. |
 | `--no-system-fonts` | Supported. By default the OS font directories are searched for the families the workbook uses. |
 | `--strict` | Accepted. XLSX input always behaves as strict: unsupported content stops the conversion instead of being approximated with a warning. |
+| `--locale ja-JP\|en-US` | XLSX only (rejected with exit code 2 for PPTX). Selects the locale of built-in date formats, month names, and DBNum. Defaults to `ja-JP`; the OS region is never read. |
 | `--width` | Ignored, as for PDF output. |
 | `--format png`, `--font-fallback`, `--font-map`, `--include-hidden`, `--punctuation-compression` | Rejected with exit code 2 (`FORMAT_NOT_SUPPORTED` or `OPTION_NOT_SUPPORTED`). |
 

@@ -10,6 +10,7 @@ pub mod cell_paint;
 pub mod cell_text;
 #[doc(hidden)]
 pub mod color;
+pub mod default_layout;
 pub mod diagnostic;
 #[doc(hidden)]
 pub mod drawing;
@@ -78,6 +79,8 @@ pub struct ConversionOptions {
     /// 不足書体だけに適用する明示的な代用。書体の曖昧さ・埋め込み制限は回避しない。
     pub fallback_family: Option<String>,
     pub system_fonts: bool,
+    /// 数値・日付の表示形式を解決する言語。OS の地域設定からは推測しない。
+    pub locale: format::date::Locale,
 }
 
 impl ConversionOptions {
@@ -208,7 +211,7 @@ pub fn prepare(
     Ok(PreparedWorkbook { workbook, fonts })
 }
 
-/// 描画実装の追加中も、未実装の変換を成功として返さない。
+/// 既定の配置規則（[`default_layout`]）で描画し、排他的に保存する。
 pub fn convert(input: &Path, output: &Path, limits: &Limits) -> Result<report::Report> {
     convert_with_options(input, output, limits, &ConversionOptions::default())
 }
@@ -220,8 +223,10 @@ pub fn convert_with_options(
     options: &ConversionOptions,
 ) -> Result<report::Report> {
     output::check_available(output)?;
-    let _prepared = prepare(input, limits, options)?;
-    Err(Failure::unsupported("rendering_not_implemented"))
+    let prepared = prepare(input, limits, options)?;
+    let rendered = default_layout::render(&prepared, options, &render::Limits::default())?;
+    output::publish(output, &rendered.bytes)?;
+    Ok(rendered.report)
 }
 
 /// 入力の準備から組版・排他的保存までを実行し、確定後にだけ成功情報を返す。

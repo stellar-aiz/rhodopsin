@@ -25,6 +25,7 @@ fn pages() -> Vec<Page<'static>> {
             baseline: 40.0,
             color: [0, 0, 0],
             clip: None,
+            advance_unit: None,
         })],
     }]
 }
@@ -575,6 +576,7 @@ fn pdf文字量は全ページのutf8合計を整形前に検査する() {
             baseline: 40.0,
             color: [0; 3],
             clip: None,
+            advance_unit: None,
         })],
     });
     // 上限超過後のフォント参照・整形へ進まない。ページごとに予算をリセットしない。
@@ -731,6 +733,7 @@ fn line_text(value: &'static str, x: f64) -> Text<'static> {
         baseline: 40.0,
         color: [0, 0, 0],
         clip: None,
+        advance_unit: None,
     }
 }
 #[test]
@@ -977,6 +980,7 @@ fn 異体字と基底文字を別のunicode対応で抽出し選択字形を埋�
                     baseline: 40.0,
                     color: [0, 0, 0],
                     clip: None,
+                    advance_unit: None,
                 })],
             };
             let render = || {

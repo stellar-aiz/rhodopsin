@@ -251,6 +251,7 @@ fn はみ出し範囲をpdfの切り取りへ渡し文字を保持する() {
             clip,
             scale: page.scale,
             baseline_step: None,
+            line_box: None,
         },
         &context,
         &mut Warnings::default(),

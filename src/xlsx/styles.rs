@@ -108,8 +108,24 @@ fn flag(n: Node<'_, '_>, key: &str) -> Result<bool> {
         .map(|v| v.unwrap_or(false))
 }
 
-// スライサー本体はシート拡張・描画の検査で拒否する。
+// スライサー・タイムライン本体はシート拡張・描画の検査で拒否する。
 // ここではセルの書式を変更しない既定名だけの宣言に限って受理する。
+// Excel for Mac 16.105 は両方の宣言を保存するブックすべてに書く。
+const DEFAULT_STYLE_EXTENSIONS: [(&str, &str, &str, &str); 2] = [
+    (
+        "{EB79DEF2-80B8-43e5-95BD-54CBDDF9020C}",
+        "http://schemas.microsoft.com/office/spreadsheetml/2009/9/main",
+        "slicerStyles",
+        "defaultSlicerStyle",
+    ),
+    (
+        "{9260A510-F301-46a8-8635-F512D64BE5F5}",
+        "http://schemas.microsoft.com/office/spreadsheetml/2010/11/main",
+        "timelineStyles",
+        "defaultTimelineStyle",
+    ),
+];
+
 fn validate_extensions(root: Node<'_, '_>) -> Result<()> {
     let Some(list) = singleton(root, "extLst")? else {
         return Ok(());
@@ -118,26 +134,26 @@ fn validate_extensions(root: Node<'_, '_>) -> Result<()> {
     if list.attributes().len() != 0 {
         return Err(unsupported());
     }
-    let mut seen = false;
+    let mut seen = [false; DEFAULT_STYLE_EXTENSIONS.len()];
     for ext in list.children().filter(|n| n.is_element()) {
-        if seen
-            || !ext.has_tag_name((S, "ext"))
-            || ext.attributes().len() != 1
-            || ext.attribute("uri") != Some("{EB79DEF2-80B8-43e5-95BD-54CBDDF9020C}")
-        {
+        if !ext.has_tag_name((S, "ext")) || ext.attributes().len() != 1 {
             return Err(unsupported());
         }
-        seen = true;
+        let index = DEFAULT_STYLE_EXTENSIONS
+            .iter()
+            .position(|(uri, ..)| ext.attribute("uri") == Some(*uri))
+            .ok_or_else(unsupported)?;
+        if std::mem::replace(&mut seen[index], true) {
+            return Err(unsupported());
+        }
+        let (_, namespace, tag, attribute) = DEFAULT_STYLE_EXTENSIONS[index];
         let mut children = ext.children().filter(|n| n.is_element());
         let styles = children.next().ok_or_else(unsupported)?;
         if children.next().is_some()
-            || !styles.has_tag_name((
-                "http://schemas.microsoft.com/office/spreadsheetml/2009/9/main",
-                "slicerStyles",
-            ))
+            || !styles.has_tag_name((namespace, tag))
             || styles.attributes().len() != 1
             || styles.children().any(|n| n.is_element())
-            || styles.attribute("defaultSlicerStyle").is_none_or(|name| {
+            || styles.attribute(attribute).is_none_or(|name| {
                 let len = name.chars().count();
                 !(1..=255).contains(&len)
             })

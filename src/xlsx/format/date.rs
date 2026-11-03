@@ -5,9 +5,11 @@ pub enum DateSystem {
     Excel1900,
     Excel1904,
 }
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Locale {
     English,
+    /// 日本語。XLSX の CLI の既定値。
+    #[default]
     Japanese,
 }
 impl Locale {

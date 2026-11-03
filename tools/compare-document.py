@@ -72,7 +72,7 @@ def compare(manifest, root, binaries, output):
         "pdf": pdf, "coverage": coverage, "pages": pages,
         "unchecked": ["rasterization_conditions", "raster_page_correspondence",
                       "cell_page_boundaries", "expected_cell_text", "amounts",
-                      "text_positions", "font_embedding", "reference_provenance"],
+                      "font_embedding", "reference_provenance"],
     }
     with (output / "comparison.json").open("x") as stream:
         json.dump(result, stream, ensure_ascii=False, indent=2)

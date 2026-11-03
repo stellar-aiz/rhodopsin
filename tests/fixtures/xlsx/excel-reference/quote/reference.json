@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "input": {
+    "file": "input.xlsx",
+    "sha256": "7d665d78cc886188ebecb81954dd094d2a226ac3535e3be87f63eb5893b3e79e"
+  },
+  "excel": {
+    "artifact": {
+      "file": "excel.pdf",
+      "sha256": "f727f6d1f57882760fdcb5f7fad1512674b1c14dc7703e095395c357b5164b16"
+    },
+    "input_sha256": "7d665d78cc886188ebecb81954dd094d2a226ac3535e3be87f63eb5893b3e79e",
+    "application": "Microsoft Excel",
+    "version": "16.105.3 for Mac",
+    "os": "macOS 27.0.1 (26A434), English UI, region Japan (en_JP)",
+    "procedure": "make_fixtures.py (openpyxl 3.1.5) generated the workbook; Excel opened it and saved it as .xlsx (this input); Excel then opened this input and saved it as PDF through AppleScript 'save workbook as ... file format PDF file format', and closed it without saving. The input hash was unchanged after export. Noto Sans JP Regular and Bold were installed in ~/Library/Fonts and Excel was restarted before export.",
+    "recalculated": false,
+    "fonts_substituted": false
+  },
+  "libreoffice": {
+    "artifact": {
+      "file": "libreoffice.pdf",
+      "sha256": "61b7d5510c7fd6828d63ac74d5a52f26fdb0b38de6484d5bd1713aebd7e59cd7"
+    },
+    "input_sha256": "7d665d78cc886188ebecb81954dd094d2a226ac3535e3be87f63eb5893b3e79e",
+    "application": "LibreOffice",
+    "version": "26.2.5.2 (cd7284b4cbbfeb507e630c1aac019f4157393acb)",
+    "os": "macOS 27.0.1 (26A434)",
+    "procedure": "soffice --headless --convert-to pdf with a fresh user profile; fonts from ~/Library/Fonts",
+    "recalculated": false,
+    "fonts_substituted": false
+  },
+  "locale": "ja-JP",
+  "date_system": "1900",
+  "fonts": [
+    {
+      "family": "Noto Sans JP",
+      "version": "2.004 (NotoSansJP-Regular, static instance of the variable font by fonttools 4.63.0)",
+      "sha256": "57458d02bb14502d7ae98abe1e2f79b52783ceda9e4628df145faae23a3d31d2"
+    },
+    {
+      "family": "Noto Sans JP",
+      "version": "2.004 (NotoSansJP-Bold, static instance of the variable font by fonttools 4.63.0)",
+      "sha256": "611dbdbda88a7a34c44232b90c71161b65178a82649bdc6e365a30f61ab28237"
+    }
+  ]
+}

@@ -237,6 +237,8 @@ pub(super) fn plan(
                 color: span.color,
                 clip: frame.clip,
                 underline,
+                // 行箱を持つ frame の書式付き文字列は呼び出し側で止める。
+                advance_unit: None,
             });
         }
     }

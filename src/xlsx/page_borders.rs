@@ -34,7 +34,9 @@ pub struct Edge {
 
 /// 同じ線分・線種・色の候補を一本にする。隣接する線分は連結しない。
 /// 破線の位相や交点の描画を変えないため、ここでは同一線分だけを扱う。
-/// 異なる指定の共有辺と部分的な重なりは、優先規則の検証まで位置付きで拒否する。
+/// 同じ色の細線と中線・太線が共有辺で重なる場合は、Excel for Mac 16.105 の PDF と同じく
+/// 太い方を残す（docs/history/20261102_xlsx-excel-mac-layout.md）。
+/// それ以外の異なる指定の共有辺と部分的な重なりは、優先規則の検証まで位置付きで拒否する。
 /// 一ページの候補を渡す。limit は入力候補数の上限。
 pub fn coalesce(edges: &[Edge], limit: usize) -> Result<Vec<Edge>> {
     if edges.len() > limit {
@@ -94,6 +96,19 @@ pub fn coalesce(edges: &[Edge], limit: usize) -> Result<Vec<Edge>> {
             let same_segment = start == ps && end == pe;
             if same_segment && edge.style == previous.style && edge.color == previous.color {
                 continue;
+            }
+            if same_segment && edge.color == previous.color {
+                use crate::xlsx::styles::LineStyle::{Medium, Thick, Thin};
+                match (previous.style, edge.style) {
+                    (Medium | Thick, Thin) => continue,
+                    (Thin, Medium | Thick) => {
+                        result.pop();
+                        result.push(edge.clone());
+                        prior = Some((vertical, fixed, start, end, edge));
+                        continue;
+                    }
+                    _ => {}
+                }
             }
             return Err(Failure::unsupported(if same_segment {
                 "border_conflict"

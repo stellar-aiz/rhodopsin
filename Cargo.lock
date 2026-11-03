@@ -931,6 +931,7 @@ dependencies = [
  "unicode-bidi",
  "unicode-bidi-mirroring",
  "unicode-linebreak",
+ "unicode-normalization",
  "unicode-script",
  "zip",
  "zune-jpeg",

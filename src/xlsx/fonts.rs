@@ -213,6 +213,22 @@ pub struct ShapedRun {
     pub descender: f64,
     pub line_gap: f64,
 }
+impl ShapedRun {
+    /// 各字形の送り幅を unit の整数倍へ丸め、run の送り幅を合計し直す。
+    pub fn snap_advances(&mut self, unit: f64) -> Result<()> {
+        if !unit.is_finite() || unit <= 0.0 {
+            return Err(Failure::new(
+                Category::LayoutFailure,
+                "invalid_advance_unit",
+            ));
+        }
+        for glyph in &mut self.glyphs {
+            glyph.advance_x = (glyph.advance_x / unit).round() * unit;
+        }
+        self.advance = self.glyphs.iter().map(|glyph| glyph.advance_x).sum();
+        Ok(())
+    }
+}
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Selection {
     pub index: usize,

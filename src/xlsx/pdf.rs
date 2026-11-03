@@ -23,6 +23,8 @@ pub struct Text<'a> {
     pub color: [u8; 3],
     /// 隣接セルの占有状況から配置層が決める可視範囲。
     pub clip: Option<graphics::BoxRect>,
+    /// Some なら各字形の送り幅をこの単位の整数倍へ丸めて並べる（[`crate::xlsx::cell_text::LineBox`]）。
+    pub advance_unit: Option<f64>,
 }
 pub mod graphics;
 use graphics::Paint;
@@ -154,7 +156,10 @@ pub fn render(
                 .faces
                 .get(text.font)
                 .ok_or_else(|| Failure::input("invalid_pdf_font_index"))?;
-            let run = font.shape_run(text.text, text.points, font_limits)?;
+            let mut run = font.shape_run(text.text, text.points, font_limits)?;
+            if let Some(unit) = text.advance_unit {
+                run.snap_advances(unit)?;
+            }
             count = count
                 .checked_add(run.glyphs.len())
                 .filter(|n| *n <= limits.glyphs)

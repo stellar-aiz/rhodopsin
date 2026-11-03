@@ -1,5 +1,7 @@
 //! Verify the CLI contract for `.xlsx` input: PDF only, YAML result documents,
 //! and no workbook content or paths in diagnostics.
+#[path = "xlsx_support/mod.rs"]
+mod support;
 use std::{ffi::OsStr, fs, io::Write, path::Path, process::Command};
 use zip::{ZipWriter, write::SimpleFileOptions};
 
@@ -65,6 +67,242 @@ fn sample_font() -> std::path::PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/samples.ttf")
 }
 
+/// Workbook inside the measured default layout: Normal and every cell font are
+/// Noto Sans JP 11 pt (the test font only borrows that family name), A4 portrait,
+/// a print area, and cells given as `cells` (a `<sheetData>` body).
+/// `fonts` replaces the cell font of style 1; `extra_xf` is appended to `cellXfs`.
+fn measured_workbook(dir: &Path, cells: &str, fonts: &str, extra_xf: &str) -> std::path::PathBuf {
+    let path = dir.join("機密の見積.xlsx");
+    let mut zip = ZipWriter::new(fs::File::create(&path).unwrap());
+    let mut add = |name: &str, value: String| {
+        zip.start_file(name, SimpleFileOptions::default()).unwrap();
+        zip.write_all(value.as_bytes()).unwrap();
+    };
+    add(
+        "[Content_Types].xml",
+        r#"<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/></Types>"#.into(),
+    );
+    add(
+        "_rels/.rels",
+        format!(
+            r#"<Relationships xmlns="{PR}"><Relationship Id="rId1" Type="{R}/officeDocument" Target="xl/workbook.xml"/></Relationships>"#
+        ),
+    );
+    add(
+        "xl/workbook.xml",
+        format!(
+            r#"<workbook xmlns="{SS}" xmlns:r="{R}"><sheets><sheet name="機密の案件名" sheetId="1" r:id="rId1"/></sheets><definedNames><definedName name="_xlnm.Print_Area" localSheetId="0">'機密の案件名'!$A$1:$B$2</definedName></definedNames></workbook>"#
+        ),
+    );
+    add(
+        "xl/_rels/workbook.xml.rels",
+        format!(
+            r#"<Relationships xmlns="{PR}"><Relationship Id="rId1" Type="{R}/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="{R}/styles" Target="styles.xml"/></Relationships>"#
+        ),
+    );
+    add(
+        "xl/styles.xml",
+        format!(
+            r#"<styleSheet xmlns="{SS}"><numFmts count="1"><numFmt numFmtId="164" formatCode="&quot;$&quot;#,##0"/></numFmts><fonts><font><sz val="11"/><name val="Noto Sans JP"/></font>{fonts}</fonts><fills><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills><borders><border><left/><right/><top/><bottom/><diagonal/></border><border><left/><right/><top/><bottom style="thin"><color rgb="FF000000"/></bottom><diagonal/></border></borders><cellStyleXfs><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="164" fontId="1" fillId="0" borderId="1" xfId="0" applyNumberFormat="1" applyFont="1" applyBorder="1"/>{extra_xf}</cellXfs><cellStyles><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>"#
+        ),
+    );
+    add(
+        "xl/worksheets/sheet1.xml",
+        format!(
+            r#"<worksheet xmlns="{SS}"><sheetFormatPr defaultRowHeight="19"/><cols><col min="1" max="2" width="20" customWidth="1"/></cols><sheetData>{cells}</sheetData><pageMargins left="0.7" right="0.7" top="0.75" bottom="0.75" header="0.3" footer="0.3"/><pageSetup paperSize="9" orientation="portrait"/></worksheet>"#
+        ),
+    );
+    zip.finish().unwrap();
+    path
+}
+
+const MEASURED_FONT: &str = r#"<font><sz val="11"/><name val="Noto Sans JP"/></font>"#;
+const MEASURED_CELLS: &str = r#"<row r="1"><c r="A1" t="inlineStr"><is><t>Total</t></is></c><c r="B1" s="1"><v>1200000</v></c></row>"#;
+
+fn measured_font(dir: &Path) -> std::path::PathBuf {
+    let path = dir.join("noto-name.ttf");
+    fs::write(&path, support::font("Noto Sans JP", false, false, 0)).unwrap();
+    path
+}
+
+#[test]
+fn xlsx_in_the_measured_layout_converts_to_one_page_with_a_success_document() {
+    let dir = tempfile::tempdir().unwrap();
+    let input = measured_workbook(dir.path(), MEASURED_CELLS, MEASURED_FONT, "");
+    let font = measured_font(dir.path());
+    let out = dir.path().join("見積.pdf");
+    let (code, stdout, stderr) = run([
+        input.as_os_str(),
+        OsStr::new("--format"),
+        OsStr::new("pdf"),
+        OsStr::new("--out"),
+        out.as_os_str(),
+        OsStr::new("--no-system-fonts"),
+        OsStr::new("--font-file"),
+        font.as_os_str(),
+    ]);
+    assert_eq!(code, Some(0), "{stderr}");
+    assert!(
+        stdout.starts_with("status: completed\noutput:\n  created: true\n"),
+        "{stdout}"
+    );
+    assert!(stdout.contains("  pages: 1\n"));
+    assert!(
+        stdout.contains(r#""first_cell":"A1","last_cell":"B2""#),
+        "{stdout}"
+    );
+    assert!(stdout.contains(r#""embedded":true"#));
+    assert!(!stdout.contains("機密"));
+    assert!(fs::read(&out).unwrap().starts_with(b"%PDF-"));
+    // A second run never overwrites the published PDF.
+    let before = fs::read(&out).unwrap();
+    let (code, _, stderr) = run([
+        input.as_os_str(),
+        OsStr::new("--format"),
+        OsStr::new("pdf"),
+        OsStr::new("--out"),
+        out.as_os_str(),
+        OsStr::new("--no-system-fonts"),
+        OsStr::new("--font-file"),
+        font.as_os_str(),
+    ]);
+    assert_eq!(code, Some(1));
+    assert!(stderr.contains("reason: output_already_exists\n"));
+    assert_eq!(fs::read(&out).unwrap(), before);
+}
+
+#[test]
+fn xlsx_locale_is_ja_jp_by_default_and_rejects_unknown_values_and_pptx_input() {
+    let dir = tempfile::tempdir().unwrap();
+    let font = measured_font(dir.path());
+    // Built-in date id 14 resolves only under en-US; ja-JP stops with its reason.
+    let input = measured_workbook(
+        dir.path(),
+        r#"<row r="1"><c r="A1" s="2"><v>46328</v></c></row>"#,
+        MEASURED_FONT,
+        r#"<xf numFmtId="14" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>"#,
+    );
+    for (locale, expected) in [
+        (None, Some(1)),
+        (Some("ja-JP"), Some(1)),
+        (Some("en-US"), Some(0)),
+    ] {
+        let out = dir
+            .path()
+            .join(format!("{}.pdf", locale.unwrap_or("default")));
+        let mut args = vec![
+            input.clone().into_os_string(),
+            "--format".into(),
+            "pdf".into(),
+            "--out".into(),
+            out.clone().into_os_string(),
+            "--no-system-fonts".into(),
+            "--font-file".into(),
+            font.clone().into_os_string(),
+        ];
+        if let Some(locale) = locale {
+            args.extend(["--locale".into(), locale.into()]);
+        }
+        let (code, _, stderr) = run(args);
+        assert_eq!(code, expected, "{locale:?} {stderr}");
+        if expected == Some(1) {
+            assert!(stderr.contains("reason: builtin_date_locale\n"), "{stderr}");
+            assert!(!out.exists());
+        }
+    }
+    let (code, stdout, stderr) = run([
+        input.as_os_str(),
+        OsStr::new("--format"),
+        OsStr::new("pdf"),
+        OsStr::new("--locale"),
+        OsStr::new("fr-FR"),
+    ]);
+    assert_eq!(code, Some(2));
+    assert!(stdout.is_empty());
+    assert!(stderr.contains("code: INVALID_ARGUMENTS"));
+    let deck = dir.path().join("deck.pptx");
+    let (code, _, stderr) = run([
+        deck.as_os_str(),
+        OsStr::new("--format"),
+        OsStr::new("pdf"),
+        OsStr::new("--locale"),
+        OsStr::new("en-US"),
+    ]);
+    assert_eq!(code, Some(2));
+    assert!(stderr.contains("--locale applies to XLSX input only."));
+}
+
+#[test]
+fn xlsx_outside_the_measured_layout_stops_with_a_located_reason_and_writes_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let font = measured_font(dir.path());
+    let theme_font =
+        r#"<font><sz val="11"/><name val="Noto Sans JP"/><scheme val="minor"/></font>"#;
+    let other_family = r#"<font><sz val="11"/><name val="Arial"/></font>"#;
+    let unmeasured_size = r#"<font><sz val="41"/><name val="Noto Sans JP"/></font>"#;
+    let double_underline =
+        r#"<font><u val="double"/><sz val="11"/><name val="Noto Sans JP"/></font>"#;
+    for (fonts, cells, reason, cell) in [
+        (theme_font, MEASURED_CELLS, "cell_layout_unmeasured", "B1"),
+        (other_family, MEASURED_CELLS, "cell_layout_unmeasured", "B1"),
+        (
+            unmeasured_size,
+            MEASURED_CELLS,
+            "cell_layout_unmeasured",
+            "B1",
+        ),
+        (
+            double_underline,
+            MEASURED_CELLS,
+            "underlined_cell_text",
+            "B1",
+        ),
+        (
+            MEASURED_FONT,
+            r#"<row r="1"><c r="A1"><f>機密の数式</f></c></row>"#,
+            "formula_cached_value_missing",
+            "A1",
+        ),
+        (
+            MEASURED_FONT,
+            r#"<row r="1"><c r="A1" t="inlineStr"><is><t>Two
+lines</t></is></c></row>"#,
+            "text_control_character",
+            "A1",
+        ),
+    ] {
+        let input = measured_workbook(dir.path(), cells, fonts, "");
+        let out = dir.path().join("out.pdf");
+        let (code, stdout, stderr) = run([
+            input.as_os_str(),
+            OsStr::new("--format"),
+            OsStr::new("pdf"),
+            OsStr::new("--out"),
+            out.as_os_str(),
+            OsStr::new("--no-system-fonts"),
+            OsStr::new("--font-file"),
+            font.as_os_str(),
+        ]);
+        assert_eq!(code, Some(1), "{reason} {stderr}");
+        assert!(stdout.is_empty());
+        assert!(
+            stderr.contains(&format!(
+                "reason: {reason}\n    location:\n      sheet: 1\n      cell: \"{cell}\"\n"
+            )),
+            "{reason} {stderr}"
+        );
+        assert!(!stderr.contains("機密"));
+        assert!(!out.exists());
+        assert!(!dir.path().read_dir().unwrap().any(|entry| {
+            entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .ends_with(".pdf")
+        }));
+    }
+}
+
 #[test]
 fn xlsx_pdf_stops_with_unsupported_feature_and_writes_nothing() {
     let dir = tempfile::tempdir().unwrap();
@@ -85,9 +323,9 @@ fn xlsx_pdf_stops_with_unsupported_feature_and_writes_nothing() {
         assert_eq!(code, Some(1), "{stderr}");
         assert!(stdout.is_empty());
         assert!(stderr.starts_with("status: failed\noutput:\n  created: false\nerrors:\n"));
+        // The minimal workbook has no styles part, so no cell layout can be resolved.
         assert!(
-            stderr
-                .contains("  - code: UNSUPPORTED_FEATURE\n    reason: rendering_not_implemented\n")
+            stderr.contains("  - code: UNSUPPORTED_FEATURE\n    reason: cell_styles_unresolved\n")
         );
         assert!(stderr.contains("    suggestion: "));
         assert!(!stderr.contains("機密"));
@@ -203,7 +441,7 @@ fn xlsx_system_font_search_follows_the_shared_flag() {
         assert_eq!(output.status.code(), Some(1), "{stderr}");
         assert!(output.stdout.is_empty());
         let reason = if no_system_fonts {
-            "rendering_not_implemented"
+            "cell_styles_unresolved"
         } else {
             "invalid_system_font_directory"
         };
@@ -217,10 +455,12 @@ fn xlsx_system_font_search_follows_the_shared_flag() {
 #[test]
 fn xlsx_denied_reads_fail_without_leaking_under_seatbelt() {
     let dir = tempfile::tempdir().unwrap();
-    let input = workbook(dir.path(), "<sheetData/>").canonicalize().unwrap();
+    let input = measured_workbook(dir.path(), MEASURED_CELLS, MEASURED_FONT, "")
+        .canonicalize()
+        .unwrap();
     let output = dir.path().canonicalize().unwrap().join("成果物.pdf");
     let font = dir.path().join("機密の書体.ttf");
-    fs::write(&font, "unreadable test data").unwrap();
+    fs::write(&font, support::font("Noto Sans JP", false, false, 0)).unwrap();
     let font = font.canonicalize().unwrap();
     let binary = Path::new(env!("CARGO_BIN_EXE_rhodopsin"))
         .canonicalize()
@@ -228,8 +468,39 @@ fn xlsx_denied_reads_fail_without_leaking_under_seatbelt() {
     // Reads for the OS runtime stay broadly allowed; the input and font denials are
     // added per case. This is not evidence for a production read allowlist.
     let base = r#"(version 1)(deny default)(allow sysctl-read)(allow file-read*)(allow process-exec (literal (param "BINARY")))"#;
+    // Allowed reads convert; the output directory is writable for the published PDF.
+    let mut allowed = Command::new("/usr/bin/sandbox-exec");
+    for (key, path) in [("BINARY", &binary), ("INPUT", &input), ("FONT", &font)] {
+        allowed.arg("-D").arg(format!("{key}={}", path.display()));
+    }
+    allowed
+        .arg("-D")
+        .arg(format!(
+            "OUTDIR={}",
+            dir.path().canonicalize().unwrap().display()
+        ))
+        .arg("-p")
+        .arg(format!(
+            r#"{base}(allow file-write* (subpath (param "OUTDIR")))"#
+        ))
+        .arg(&binary)
+        .arg(&input)
+        .args(["--format", "pdf", "--no-system-fonts", "--font-file"])
+        .arg(&font)
+        .arg("--out")
+        .arg(&output);
+    let result = allowed.output().unwrap();
+    let stdout = String::from_utf8(result.stdout).unwrap();
+    assert_eq!(
+        result.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    assert!(stdout.starts_with("status: completed\n"));
+    assert!(fs::read(&output).unwrap().starts_with(b"%PDF-"));
+    fs::remove_file(&output).unwrap();
     for (extra, use_font, reason) in [
-        ("", false, "rendering_not_implemented"),
         (
             r#"(deny file-read-data (literal (param "INPUT")))"#,
             false,

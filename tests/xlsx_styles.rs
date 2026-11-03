@@ -3,15 +3,22 @@ use rhodopsin::xlsx::styles::{
 };
 
 #[test]
-fn 空のスライサースタイル既定名だけを受理する() {
+fn 空のスライサー・タイムラインスタイル既定名だけを受理する() {
     let declaration = r#"<ext uri="{EB79DEF2-80B8-43e5-95BD-54CBDDF9020C}"><x:slicerStyles xmlns:x="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main" defaultSlicerStyle="SlicerStyleLight1"/></ext>"#;
+    // Excel for Mac 16.105 が保存するブックの宣言。
+    let timeline = r#"<ext uri="{9260A510-F301-46a8-8635-F512D64BE5F5}"><x15:timelineStyles xmlns:x15="http://schemas.microsoft.com/office/spreadsheetml/2010/11/main" defaultTimelineStyle="TimeSlicerStyleLight1"/></ext>"#;
     let wrap = |body: &str| {
         format!(
             r#"<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><extLst>{body}</extLst></styleSheet>"#
         )
     };
-    for body in ["", declaration] {
-        let xml = wrap(body);
+    for body in [
+        String::new(),
+        declaration.into(),
+        timeline.into(),
+        format!("{declaration}{timeline}"),
+    ] {
+        let xml = wrap(&body);
         assert!(Styles::parse(roxmltree::Document::parse(&xml).unwrap().root_element()).is_ok());
     }
     for body in [
@@ -27,6 +34,10 @@ fn 空のスライサースタイル既定名だけを受理する() {
         declaration.replace("/>", ">機密</x:slicerStyles>"),
         format!("{declaration}{declaration}"),
         declaration.replace("</ext>", "<unknown/></ext>"),
+        format!("{timeline}{timeline}"),
+        timeline.replace("timelineStyles", "slicerStyles"),
+        timeline.replace("2010/11/main", "2009/9/main"),
+        timeline.replace(r#" defaultTimelineStyle="TimeSlicerStyleLight1""#, ""),
     ] {
         let xml = wrap(&body);
         let error =

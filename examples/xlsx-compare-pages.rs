@@ -1,4 +1,7 @@
-//! 開発専用。三者のページ幾何と抽出文字を比較する。紙面全体の合否は判定しない。
+//! 開発専用。三者のページ幾何、抽出文字、文字・罫線・塗りの位置を比較する。
+//! 紙面全体の合否は判定しない。
+#[path = "xlsx-compare-pages/layout.rs"]
+mod layout;
 use lopdf::{Document, Object, ObjectId};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -14,7 +17,23 @@ struct Geometry {
 struct Observation {
     sha256: String,
     pages: Vec<Geometry>,
+    /// 康熙部首・部首補助だけを統合漢字へ戻した抽出文字。
     extracted_text: Vec<TextFingerprint>,
+    raw_extracted_text: Vec<TextFingerprint>,
+    /// 文字列を含むため出力しない。
+    #[serde(skip)]
+    layout: Vec<layout::PageLayout>,
+}
+impl Geometry {
+    /// Excel for Mac は MediaBox を整数ポイントで書く（A4 は 595×842）。
+    fn rounded(&self) -> Self {
+        let round = |r: [f64; 4]| r.map(f64::round);
+        Self {
+            media_box_pt: round(self.media_box_pt),
+            crop_box_pt: round(self.crop_box_pt),
+            rotation: self.rotation,
+        }
+    }
 }
 #[derive(Clone, Debug, PartialEq, Serialize)]
 struct TextFingerprint {
@@ -152,21 +171,24 @@ fn observe(path: &Path) -> Result<Observation> {
     let sha256 = format!("{:x}", Sha256::digest(&bytes));
     let doc = Document::load_mem(&bytes).map_err(|_| "invalid_pdf")?;
     let pages = geometry(&doc)?;
-    let extracted_text = doc
-        .get_pages()
-        .iter()
-        .map(|(page, id)| {
-            check_text_extraction(&doc, *id)?;
-            let text = doc
-                .extract_text(&[*page])
-                .map_err(|_| "pdf_text_extraction_failed")?;
-            Ok(fingerprint(&text))
-        })
-        .collect::<Result<Vec<_>>>()?;
+    let mut extracted_text = Vec::new();
+    let mut raw_extracted_text = Vec::new();
+    let mut layouts = Vec::new();
+    for ((page, id), geometry) in doc.get_pages().iter().zip(&pages) {
+        check_text_extraction(&doc, *id)?;
+        let text = doc
+            .extract_text(&[*page])
+            .map_err(|_| "pdf_text_extraction_failed")?;
+        raw_extracted_text.push(fingerprint(&text));
+        extracted_text.push(fingerprint(&layout::normalize_radicals(&text)));
+        layouts.push(layout::read(&doc, *id, geometry.media_box_pt[3])?);
+    }
     Ok(Observation {
         sha256,
         pages,
         extracted_text,
+        raw_extracted_text,
+        layout: layouts,
     })
 }
 
@@ -231,6 +253,9 @@ fn check_text_extraction(doc: &Document, page: ObjectId) -> Result<()> {
     }
     Ok(())
 }
+fn rounded(pages: &[Geometry]) -> Vec<Geometry> {
+    pages.iter().map(Geometry::rounded).collect()
+}
 fn compare<T: Clone + PartialEq>(reference: &[T], candidate: &[T]) -> Comparison<T> {
     let differences: Vec<_> = (0..reference.len().max(candidate.len()))
         .filter_map(|index| {
@@ -260,8 +285,10 @@ fn pair_json(
 ) -> serde_json::Value {
     match (reference, candidate) {
         (Ok(reference), Ok(candidate)) => serde_json::json!({"status":"compared",
-            "geometry":compare(&reference.pages,&candidate.pages),
-            "extracted_text":compare(&reference.extracted_text,&candidate.extracted_text)}),
+            "geometry":compare(&rounded(&reference.pages),&rounded(&candidate.pages)),
+            "extracted_text":compare(&reference.extracted_text,&candidate.extracted_text),
+            "raw_extracted_text":compare(&reference.raw_extracted_text,&candidate.raw_extracted_text),
+            "positions":layout::compare(&reference.layout,&candidate.layout)}),
         _ => {
             serde_json::json!({"status":"unobserved","reference_observed":reference.is_ok(),"candidate_observed":candidate.is_ok()})
         }
@@ -273,17 +300,20 @@ fn report(
     libreoffice: &Result<Observation>,
 ) -> (serde_json::Value, u8) {
     let exit_code = match (excel, rhodopsin_xlsx) {
+        // ページ全体の抽出文字は描画順と分割に依存するため参考値とし、文字列の一致は
+        // positions の文字表示ごとの照合で判定する。
         (Ok(excel), Ok(ours)) => u8::from(
-            !(compare(&excel.pages, &ours.pages).matches
-                && compare(&excel.extracted_text, &ours.extracted_text).matches),
+            !(compare(&rounded(&excel.pages), &rounded(&ours.pages)).matches
+                && layout::compare(&excel.layout, &ours.layout).matches),
         ),
         _ => 2,
     };
-    let report = serde_json::json!({"schema_version":3,"scope":"page_geometry_and_extracted_text","overall_verdict":"not_evaluated",
-        "text_extractor":"lopdf-0.38.0","text_normalization":"none",
+    let report = serde_json::json!({"schema_version":4,"scope":"page_geometry_extracted_text_and_positions","overall_verdict":"not_evaluated",
+        "text_extractor":"lopdf-0.38.0","text_normalization":"kangxi_radicals_to_unified_ideographs",
+        "page_size_comparison":"rounded_to_whole_points","position_tolerance_pt":layout::TOLERANCE,
         "observations":{"excel":observation_json(excel),"rhodopsin_xlsx":observation_json(rhodopsin_xlsx),"libreoffice":observation_json(libreoffice)},
         "comparisons":{"rhodopsin_xlsx_vs_excel":pair_json(excel,rhodopsin_xlsx),"libreoffice_vs_excel":pair_json(excel,libreoffice),"rhodopsin_xlsx_vs_libreoffice":pair_json(libreoffice,rhodopsin_xlsx)},
-        "unchecked":["cell_page_boundaries","expected_cell_text","amounts","text_positions","font_embedding","raster_difference"]});
+        "unchecked":["cell_page_boundaries","expected_cell_text","amounts","glyph_positions_within_runs","font_embedding","raster_difference"]});
     (report, exit_code)
 }
 fn run() -> Result<u8> {
@@ -381,6 +411,7 @@ mod text_tests {
                             baseline: 20.0,
                             color: [0; 3],
                             clip: None,
+                            advance_unit: None,
                         })],
                     }],
                     &fonts,
@@ -405,6 +436,63 @@ mod text_tests {
         assert!(!json.contains("見 123"));
     }
     #[test]
+    fn 文字表示の原点を許容差で比べ文字列は出力しない() {
+        use rhodopsin::xlsx::{
+            fonts::{FontBook, FontLimits},
+            pdf::{self, Item, Page, Text},
+        };
+        let limits = FontLimits::default();
+        let mut fonts = FontBook::default();
+        fonts
+            .load_bytes(super::support::font("検証", false, false, 0), &limits)
+            .unwrap();
+        let dir = tempfile::TempDir::new().unwrap();
+        let observe_at = |name: &str, text: &str, x: f64| {
+            let bytes = pdf::render(
+                &[Page {
+                    width: 100.0,
+                    height: 100.0,
+                    items: vec![Item::Text(Text {
+                        text,
+                        font: 0,
+                        points: 10.0,
+                        x,
+                        baseline: 20.0,
+                        color: [0; 3],
+                        clip: None,
+                        advance_unit: None,
+                    })],
+                }],
+                &fonts,
+                &Default::default(),
+                &limits,
+            )
+            .unwrap();
+            let path = dir.path().join(name);
+            std::fs::write(&path, bytes).unwrap();
+            observe(&path).unwrap()
+        };
+        let reference = observe_at("reference.pdf", "見 123", 10.0);
+        let near = observe_at("near.pdf", "見 123", 11.0);
+        let far = observe_at("far.pdf", "見 123", 11.5);
+        let other = observe_at("other.pdf", "見 124", 10.0);
+        assert!(layout::compare(&reference.layout, &near.layout).matches);
+        let result = layout::compare(&reference.layout, &far.layout);
+        assert!(!result.matches);
+        assert_eq!(result.exceeded[0].kind, "text");
+        assert_eq!(result.exceeded[0].delta_pt, 1.5);
+        let result = layout::compare(&reference.layout, &other.layout);
+        assert_eq!(result.unmatched_reference_runs, 1);
+        assert!(!serde_json::to_string(&result).unwrap().contains("見"));
+    }
+    #[test]
+    fn 康熙部首だけを統合漢字へ戻す() {
+        assert_eq!(layout::normalize_radicals("御\u{2F92}積書"), "御見積書");
+        assert_eq!(layout::normalize_radicals("\u{2F00}\u{2E9F}"), "一母");
+        // 全角記号や互換文字は変えない。
+        assert_eq!(layout::normalize_radicals("：（①）"), "：（①）");
+    }
+    #[test]
     fn 空白と改行も正規化せず比較する() {
         assert_ne!(fingerprint("A B"), fingerprint("AB"));
         assert_ne!(fingerprint("A\nB"), fingerprint("A B"));
@@ -425,6 +513,8 @@ mod missing_tests {
                 rotation: 0,
             }],
             extracted_text: vec![fingerprint("test")],
+            raw_extracted_text: vec![fingerprint("test")],
+            layout: vec![layout::PageLayout::default()],
         })
     }
     #[test]
@@ -470,6 +560,30 @@ mod missing_tests {
 #[cfg(test)]
 mod extraction_tests {
     use super::*;
+    fn shapes(content: &[u8]) -> layout::PageLayout {
+        use lopdf::{Stream, dictionary};
+        let mut doc = Document::with_version("1.7");
+        let content = doc.add_object(Stream::new(dictionary! {}, content.to_vec()));
+        let page = doc.add_object(
+            dictionary! {"Type"=>"Page","Contents"=>content,"Resources"=>dictionary! {}},
+        );
+        layout::read(&doc, page, 100.0).unwrap()
+    }
+    #[test]
+    fn 塗った細い矩形と線を同じ罫線として比べる() {
+        let filled = shapes(b"q 0 0 0 rg 10 89 50 1 re f 0 0.5 0.5 rg 10 10 30 30 re f Q");
+        let stroked =
+            shapes(b"q 0 0 0 RG 1 w 10 89.5 m 60 89.5 l S 0 0.5 0.5 rg 10 10 30 30 re f Q");
+        assert_eq!(filled.rules.len(), 1);
+        assert_eq!(filled.areas.len(), 1);
+        assert!(layout::compare(&[filled.clone()], &[stroked]).matches);
+        let thicker =
+            shapes(b"q 0 0 0 RG 3 w 10 89.5 m 60 89.5 l S 0 0.5 0.5 rg 10 10 30 30 re f Q");
+        assert!(!layout::compare(&[filled.clone()], &[thicker]).matches);
+        let shorter =
+            shapes(b"q 0 0 0 RG 1 w 10 89.5 m 50 89.5 l S 0 0.5 0.5 rg 10 10 30 30 re f Q");
+        assert!(!layout::compare(&[filled], &[shorter]).matches);
+    }
     fn document(content: &[u8], subtype: &str) -> (Document, ObjectId) {
         use lopdf::{Stream, dictionary};
         let mut doc = Document::with_version("1.7");

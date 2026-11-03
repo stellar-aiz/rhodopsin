@@ -125,6 +125,7 @@ fn 背景文字画像を順番に描画して文字抽出と決定性を保つ()
                 clip: placement.rect,
                 scale: page.scale,
                 baseline_step: None,
+                line_box: None,
             })
         },
     )
@@ -203,6 +204,7 @@ fn 画像と総量の失敗で文字段の警告を確定しない() {
                     clip: rect,
                     scale: page.scale,
                     baseline_step: None,
+                    line_box: None,
                 })
             },
         )
@@ -277,6 +279,7 @@ fn 下線を文字と画像の間へ追加し描画数の上限にも含める()
                     clip: placement.rect,
                     scale: page.scale,
                     baseline_step: None,
+                    line_box: None,
                 })
             },
         )
@@ -328,6 +331,7 @@ fn check_scene(
                 clip: placement.rect,
                 scale: page.scale,
                 baseline_step: None,
+                line_box: None,
             })
         },
     )

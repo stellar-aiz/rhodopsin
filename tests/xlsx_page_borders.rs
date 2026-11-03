@@ -47,6 +47,29 @@ fn 共有辺の線種と色が違えば優先順位を推測しない() {
     }
 }
 #[test]
+fn 同色の細線は中線と太線に譲り中線と太線の優先は推測しない() {
+    // Excel for Mac 16.105 の PDF では、細線と中線・太線の共有辺に太い方だけが描かれた。
+    for heavier in [LineStyle::Medium, LineStyle::Thick] {
+        let thin = edge("A1", Side::Bottom, [0.0, 20.0], [10.0, 20.0]);
+        let mut heavy = edge("A2", Side::Top, [0.0, 20.0], [10.0, 20.0]);
+        heavy.style = heavier;
+        for edges in [[thin.clone(), heavy.clone()], [heavy.clone(), thin.clone()]] {
+            let result = coalesce(&edges, 2).unwrap();
+            assert_eq!(result.len(), 1);
+            assert_eq!(result[0].style, heavier);
+            assert_eq!(result[0].cell, "A2");
+        }
+    }
+    let mut medium = edge("A1", Side::Bottom, [0.0, 20.0], [10.0, 20.0]);
+    medium.style = LineStyle::Medium;
+    let mut thick = edge("A2", Side::Top, [0.0, 20.0], [10.0, 20.0]);
+    thick.style = LineStyle::Thick;
+    assert_eq!(
+        coalesce(&[medium, thick], 2).unwrap_err().reason,
+        "border_conflict"
+    );
+}
+#[test]
 fn 部分的な重なりは同色でも二重描画しない() {
     let a = edge("A1", Side::Bottom, [-10.0, 20.0], [10.0, 20.0]);
     for range in [[0.0, 20.0], [-5.0, 5.0]] {

@@ -64,8 +64,12 @@ impl PreparedWorkbook {
             let selected = self
                 .fonts
                 .select_request(&request, options.fallback_family.as_deref())?;
-            let mdw =
-                self.fonts.faces[selected.index].maximum_digit_width(request.points)? * 96.0 / 72.0;
+            // Excel は数字最大幅を整数ピクセルで扱う（Excel for Mac 16.105 の PDF で確認）。
+            let mdw = (self.fonts.faces[selected.index].maximum_digit_width(request.points)?
+                * 96.0
+                / 72.0)
+                .round()
+                .max(1.0);
             // 印刷倍率は paginate が適用する。ここで二重に掛けない。
             crate::xlsx::layout::column_points(1.0, mdw)?;
             Ok(ColumnMetrics {
