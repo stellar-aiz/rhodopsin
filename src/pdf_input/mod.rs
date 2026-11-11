@@ -44,7 +44,15 @@ pub fn convert(
     output: impl AsRef<Path>,
     options: &Options,
 ) -> Result<Report> {
-    let output = output.as_ref();
+    convert_staged(input.as_ref(), output.as_ref(), options, |_| Ok(()))
+}
+
+fn convert_staged(
+    input: &Path,
+    output: &Path,
+    options: &Options,
+    before_write: impl FnOnce(&Path) -> Result<()>,
+) -> Result<Report> {
     ensure!(
         (64..=4096).contains(&options.width),
         "Output width out of range"
@@ -73,6 +81,7 @@ pub fn convert(
             .tempdir_in(parent),
     )?;
     let result = (|| -> Result<Report> {
+        before_write(stage.path())?;
         let mut renderer = render::Renderer::new(&doc);
         let mut report = Report { pages: Vec::new() };
         for (index, page) in pages.iter().enumerate() {
@@ -131,6 +140,28 @@ fn publish(stage: &Path, out: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn image_write_failure_cleans_staged_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let input = dir.path().join("input.pdf");
+        let mut pdf = crate::pdf::Pdf::new();
+        let tree = resvg::usvg::Tree::from_str(
+            r#"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><path d="M0 0H50V50H0Z"/></svg>"#,
+            &Default::default(),
+        ).unwrap();
+        pdf.page(&tree).unwrap();
+        fs::write(&input, pdf.finish().unwrap()).unwrap();
+        let output = dir.path().join("out");
+        let error = convert_staged(&input, &output, &Options::default(), |stage| {
+            fs::create_dir(stage.join("page-001.png"))?;
+            Ok(())
+        })
+        .unwrap_err();
+        assert!(error.to_string().contains("Cannot write page image"));
+        assert!(!output.exists());
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
+
     #[test]
     fn publication_refuses_a_destination_created_after_staging() {
         let dir = tempfile::tempdir().unwrap();
