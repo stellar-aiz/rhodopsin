@@ -7,7 +7,9 @@ license = "MIT"
 repository = "https://github.com/stellar-aiz/rhodopsin"
 
 [features]
-default = ["cli", "xlsx"]
+default = ["cli", "xlsx", "pdf-input"]
+# Bounded in-house PDF interpretation and PNG output.
+pdf-input = ["dep:tempfile", "dep:rustix", "dep:windows-sys"]
 # The `rhodopsin` binary and `rhodopsin::cli`; library users without it do not compile clap.
 cli = ["dep:clap"]
 # Spreadsheet (.xlsx) to PDF: `rhodopsin::xlsx` and the CLI's .xlsx route. PPTX-only library
@@ -57,6 +59,9 @@ unicode-script = { version = "0.5.8", optional = true }
 
 [target.'cfg(unix)'.dependencies]
 rustix = { version = "1", features = ["fs"], optional = true }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem"], optional = true }
 
 [dev-dependencies]
 lopdf = { version = "0.38", default-features = false }

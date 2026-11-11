@@ -235,3 +235,96 @@ fn dangling_output_symlink_is_never_replaced() {
     assert!(convert_pdf(&input, &out, &options()).is_err());
     assert_eq!(fs::read_link(out).unwrap(), Path::new("missing"));
 }
+
+#[cfg(feature = "pdf-input")]
+#[test]
+fn self_produced_basic_pdf_round_trips_to_page_images() {
+    let temp = tempfile::tempdir().unwrap();
+    let dir = std::env::var_os("RHODOPSIN_PDF_INPUT_EVIDENCE")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| temp.path().to_path_buf());
+    fs::create_dir_all(&dir).unwrap();
+    let input = dir.join("input.pptx");
+    fixture(
+        &input,
+        "<a:solidFill><a:srgbClr val=\"FF0000\"/></a:solidFill>",
+        false,
+    );
+    // Add an opaque two-color image independently of the PDF writer.
+    {
+        use std::io::Read;
+        let mut archive = zip::ZipArchive::new(fs::File::open(&input).unwrap()).unwrap();
+        let mut entries = Vec::new();
+        for i in 0..archive.len() {
+            let mut file = archive.by_index(i).unwrap();
+            let name = file.name().to_owned();
+            let mut bytes = Vec::new();
+            file.read_to_end(&mut bytes).unwrap();
+            if name.starts_with("ppt/slides/slide") {
+                let xml = String::from_utf8(bytes).unwrap().replace("</p:spTree>",
+                    &format!(r#"<p:pic><p:nvPicPr><p:cNvPr id="9" name="Image"/><p:cNvPicPr/><p:nvPr/></p:nvPicPr><p:blipFill><a:blip xmlns:r="{R}" r:embed="img"/><a:stretch><a:fillRect/></a:stretch></p:blipFill><p:spPr><a:xfrm><a:off x="1381125" y="571500"/><a:ext cx="285750" cy="285750"/></a:xfrm><a:prstGeom prst="rect"/></p:spPr></p:pic></p:spTree>"#));
+                bytes = xml.into_bytes();
+            }
+            entries.push((name, bytes));
+        }
+        drop(archive);
+        for n in 1..=2 {
+            entries.push((format!("ppt/slides/_rels/slide{n}.xml.rels"), format!(r#"<Relationships xmlns="{PR}"><Relationship Id="img" Type="{R}/image" Target="../media/image.png"/></Relationships>"#).into_bytes()));
+        }
+        let mut png = Vec::new();
+        {
+            let mut encoder = png::Encoder::new(&mut png, 1, 2);
+            encoder.set_color(png::ColorType::Rgb);
+            encoder
+                .write_header()
+                .unwrap()
+                .write_image_data(&[255, 255, 0, 0, 0, 255])
+                .unwrap();
+        }
+        entries.push(("ppt/media/image.png".into(), png));
+        let mut zip = ZipWriter::new(fs::File::create(&input).unwrap());
+        for (name, bytes) in entries {
+            zip.start_file(name, SimpleFileOptions::default()).unwrap();
+            zip.write_all(&bytes).unwrap();
+        }
+        zip.finish().unwrap();
+    }
+    let opts = options();
+    convert_pdf(&input, dir.join("input.pdf"), &opts).unwrap();
+    convert(&input, dir.join("direct"), &opts).unwrap();
+    let result = rhodopsin::pdf_input::convert(
+        dir.join("input.pdf"),
+        dir.join("raster"),
+        &Default::default(),
+    )
+    .unwrap();
+    assert_eq!(result.pages.len(), 2);
+    for page in &result.pages {
+        assert_eq!((page.width, page.height), (1600, 800));
+        let actual =
+            resvg::tiny_skia::Pixmap::load_png(dir.join("raster").join(&page.file)).unwrap();
+        let direct = resvg::tiny_skia::Pixmap::load_png(
+            dir.join("direct")
+                .join(format!("slide-{:03}.png", page.page)),
+        )
+        .unwrap();
+        let mut changed = 0;
+        let mut delta = 0u64;
+        for (a, b) in actual.pixels().iter().zip(direct.pixels()) {
+            let a = a.demultiply();
+            let b = b.demultiply();
+            let ds = [
+                a.red().abs_diff(b.red()),
+                a.green().abs_diff(b.green()),
+                a.blue().abs_diff(b.blue()),
+            ];
+            delta += ds.iter().map(|n| *n as u64).sum::<u64>();
+            if ds.iter().any(|n| *n > 16) {
+                changed += 1;
+            }
+        }
+        let count = actual.pixels().len() as f64;
+        assert!(delta as f64 / count / 3. / 255. <= 0.02);
+        assert!(changed as f64 / count <= 0.05);
+    }
+}

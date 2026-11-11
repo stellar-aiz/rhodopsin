@@ -33,10 +33,10 @@ enum Locale {
     after_help = "Fonts: system fonts are loaded by default; application bundles and inaccessible paths may not be searched. Add available font files with --font-file.
 Individual missing glyphs use available fallback fonts with warnings; unrenderable glyphs fail. Family substitution requires --font-fallback.
 Results: YAML on stdout for success, stderr for failure. PNG diagnostics are saved in manifest.json; PDF diagnostics are included in the result document.
-XLSX: .xlsx input is converted to PDF only and always stops on unsupported content (as with --strict). Supported options: --out, --font-file, --no-system-fonts, --strict, --locale. Only the layout measured against Excel for Mac is rendered (cells in Noto Sans JP, 6-40 pt); see docs/xlsx.md."
+PDF input: experimental basic paths, Type 3 text and opaque RGB images only; unsupported content fails. See docs/pdf-input.md.\nXLSX: .xlsx input is converted to PDF only and always stops on unsupported content (as with --strict). Supported options: --out, --font-file, --no-system-fonts, --strict, --locale. Only the layout measured against Excel for Mac is rendered (cells in Noto Sans JP, 6-40 pt); see docs/xlsx.md."
 )]
 struct Args {
-    /// Input PPTX, or XLSX workbook (PDF only)
+    /// Input PPTX, PDF (supported subset to PNG), or XLSX workbook (PDF only)
     input: PathBuf,
     /// Output format
     #[arg(long, value_enum, default_value_t = Format::Png)]
@@ -147,6 +147,61 @@ where
             Format::Pdf => "pdf",
         })
     });
+    if args
+        .input
+        .extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case("pdf"))
+    {
+        #[cfg(not(feature = "pdf-input"))]
+        {
+            eprint!(
+                "{}",
+                output::invalid_arguments("PDF input support is disabled.")
+            );
+            return ExitCode::from(2);
+        }
+        #[cfg(feature = "pdf-input")]
+        {
+            if matches!(args.format, Format::Pdf)
+                || args.font_fallback
+                || !args.font_map.is_empty()
+                || args.include_hidden
+                || args.punctuation_compression
+                || !args.font_file.is_empty()
+                || args.no_system_fonts
+                || args.locale.is_some()
+            {
+                eprint!(
+                    "{}",
+                    output::invalid_arguments(
+                        "PDF input supports PNG output, --width, --out and --strict only."
+                    )
+                );
+                return ExitCode::from(2);
+            }
+            match crate::pdf_input::convert(
+                &args.input,
+                &out,
+                &crate::pdf_input::Options {
+                    width: args.width,
+                    strict: args.strict,
+                },
+            ) {
+                Ok(report) => println!(
+                    "status: completed\nformat: png\nresult: {}",
+                    serde_json::to_string(&report).expect("report serialization")
+                ),
+                Err(error) => {
+                    eprintln!(
+                        "status: failed\nmessage: {}",
+                        output::quoted(&error.to_string())
+                    );
+                    return ExitCode::from(1);
+                }
+            }
+            return ExitCode::SUCCESS;
+        }
+    }
     #[cfg(feature = "xlsx")]
     if xlsx::is_spreadsheet(&args.input) {
         if matches!(args.format, Format::Png) {
