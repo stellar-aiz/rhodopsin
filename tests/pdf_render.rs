@@ -1,5 +1,5 @@
 #![cfg(feature = "pdf-input")]
-use rhodopsin::pdf_input::{Options, convert};
+use rhodopsin::pdf::{Options, render};
 use std::fs;
 fn pdf(content: &str, extra: &str) -> Vec<u8> {
     let objects = [
@@ -32,7 +32,7 @@ fn pdf(content: &str, extra: &str) -> Vec<u8> {
 fn run(content: &str, extra: &str) -> Result<resvg::tiny_skia::Pixmap, String> {
     let dir = tempfile::tempdir().unwrap();
     fs::write(dir.path().join("in.pdf"), pdf(content, extra)).unwrap();
-    convert(
+    render(
         dir.path().join("in.pdf"),
         dir.path().join("out"),
         &Options {
@@ -87,11 +87,11 @@ fn output_exists_and_late_failure_preserve_destination() {
     fs::write(&input, pdf("", "")).unwrap();
     fs::create_dir(&out).unwrap();
     fs::write(out.join("keep"), "keep").unwrap();
-    assert!(convert(&input, &out, &Default::default()).is_err());
+    assert!(render(&input, &out, &Default::default()).is_err());
     assert_eq!(fs::read_to_string(out.join("keep")).unwrap(), "keep");
     let failed = dir.path().join("failed");
     fs::write(&input, pdf("q", "")).unwrap();
-    assert!(convert(&input, &failed, &Default::default()).is_err());
+    assert!(render(&input, &failed, &Default::default()).is_err());
     assert!(!failed.exists());
     assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 2);
 }
@@ -165,7 +165,7 @@ fn independent_image_orientation_and_decompression_limit() {
     let input = dir.path().join("image.pdf");
     let compressed = miniz_oxide::deflate::compress_to_vec_zlib(&[255, 0, 0, 0, 0, 255], 6);
     fs::write(&input, image_pdf(&compressed, "")).unwrap();
-    convert(
+    render(
         &input,
         dir.path().join("out"),
         &Options {
@@ -179,7 +179,7 @@ fn independent_image_orientation_and_decompression_limit() {
     assert!(p.pixel(50, 90).unwrap().blue() > 240);
     let bomb = miniz_oxide::deflate::compress_to_vec_zlib(&vec![0; 16 * 1024 * 1024 + 1], 1);
     fs::write(&input, image_pdf(&bomb, "")).unwrap();
-    let error = convert(&input, dir.path().join("bomb"), &Default::default()).unwrap_err();
+    let error = render(&input, dir.path().join("bomb"), &Default::default()).unwrap_err();
     assert!(error.to_string().contains("oversized"));
     assert!(!dir.path().join("bomb").exists());
 }
@@ -195,7 +195,7 @@ fn masks_and_unsupported_filters_fail_in_both_modes() {
         ] {
             fs::write(&input, image_pdf(&[1, 2, 3], extra)).unwrap();
             assert!(
-                convert(
+                render(
                     &input,
                     dir.path().join("out"),
                     &Options { width: 100, strict }
@@ -222,7 +222,7 @@ fn page_tree_cycles_and_missing_objects_are_rejected() {
             ]),
         )
         .unwrap();
-        assert!(convert(input, dir.path().join("out"), &Default::default()).is_err());
+        assert!(render(input, dir.path().join("out"), &Default::default()).is_err());
     }
 }
 
@@ -246,7 +246,7 @@ fn used_unsupported_resources_fail_but_unused_resources_do_not() {
             let input = dir.path().join("in.pdf");
             fs::write(&input, &bytes).unwrap();
             assert_eq!(
-                convert(
+                render(
                     &input,
                     dir.path().join("out"),
                     &Options { width: 100, strict }
@@ -265,7 +265,7 @@ fn later_page_failure_cleans_previously_staged_page() {
         b"<< /Type /Pages /Kids [3 0 R 5 0 R] /Count 2 /MediaBox [0 0 100 100] /Resources << >> >>".to_vec(),
         b"<< /Type /Page /Parent 2 0 R /Contents 4 0 R >>".to_vec(),stream(b"",""),
         b"<< /Type /Page /Parent 2 0 R /Contents 6 0 R >>".to_vec(),stream(b"secret_operator","")])).unwrap();
-    let err = convert(input, dir.path().join("out"), &Default::default())
+    let err = render(input, dir.path().join("out"), &Default::default())
         .unwrap_err()
         .to_string();
     assert!(err.contains("page 2"));
@@ -279,7 +279,7 @@ fn input_width_boundaries_and_oversized_input() {
         let input = dir.path().join("in.pdf");
         fs::write(&input, pdf("", "")).unwrap();
         assert_eq!(
-            convert(
+            render(
                 input,
                 dir.path().join("out"),
                 &Options {
@@ -298,7 +298,7 @@ fn input_width_boundaries_and_oversized_input() {
         .set_len(32 * 1024 * 1024 + 1)
         .unwrap();
     assert!(
-        convert(input, dir.path().join("out"), &Default::default())
+        render(input, dir.path().join("out"), &Default::default())
             .unwrap_err()
             .to_string()
             .contains("Input byte limit")
@@ -321,7 +321,7 @@ fn encrypted_trailer_is_rejected_without_document_text() {
         .replace("/Size 5 /Root", "/Encrypt 9 0 R /Size 5 /Root");
     fs::write(&input, bytes).unwrap();
     assert!(
-        convert(input, dir.path().join("out"), &Default::default())
+        render(input, dir.path().join("out"), &Default::default())
             .unwrap_err()
             .to_string()
             .contains("Encrypted")
@@ -339,7 +339,7 @@ fn independent_type3_font_matrix_and_character_positioning() {
         stream(b"1 0 0 rg BT /F 20 Tf 1 0 0 1 10 10 Tm <4141> Tj ET",""),
         b"<< /Type /Font /Subtype /Type3 /FontBBox [0 0 100 100] /FontMatrix [0.01 0 0 0.01 0 0] /Encoding << /Differences [65 /g] >> /FirstChar 65 /LastChar 65 /Widths [150] /Resources << >> /CharProcs << /g 6 0 R >> >>".to_vec(),
         stream(b"150 0 d0 0 0 m 100 0 l 100 100 l 0 100 l h f", "")])).unwrap();
-    convert(
+    render(
         input,
         dir.path().join("out"),
         &Options {

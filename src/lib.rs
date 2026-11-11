@@ -8,14 +8,23 @@
 //! ```
 #[cfg(feature = "cli")]
 pub mod cli;
-mod pdf;
+pub mod pdf;
+/// Compatibility path for the initial PDF-input API. Prefer [`pdf::render()`].
+///
+/// ```no_run
+/// let options: rhodopsin::pdf_input::Options = rhodopsin::pdf::Options::default();
+/// let report: rhodopsin::pdf::Report =
+///     rhodopsin::pdf_input::convert("input.pdf", "pages", &options)?;
+/// # Ok::<(), anyhow::Error>(())
+/// ```
 #[cfg(feature = "pdf-input")]
-pub mod pdf_input;
-mod pdf_output;
+pub mod pdf_input {
+    pub use crate::pdf::{Options, Page, Report, render as convert};
+}
 mod pptx;
 #[cfg(feature = "xlsx")]
 pub mod xlsx;
-pub use pdf_output::{PdfConversionReport, PdfSlideReport, convert_pdf};
+pub use pdf::{PdfConversionReport, PdfSlideReport, convert_pdf};
 
 use anyhow::{Context, Result, bail};
 pub use pptx::{Diagnostic, DiagnosticCode, FontResolution};

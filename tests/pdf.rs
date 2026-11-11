@@ -292,7 +292,7 @@ fn self_produced_basic_pdf_round_trips_to_page_images() {
     let opts = options();
     convert_pdf(&input, dir.join("input.pdf"), &opts).unwrap();
     convert(&input, dir.join("direct"), &opts).unwrap();
-    let result = rhodopsin::pdf_input::convert(
+    let result = rhodopsin::pdf::render(
         dir.join("input.pdf"),
         dir.join("raster"),
         &Default::default(),

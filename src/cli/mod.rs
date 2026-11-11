@@ -179,10 +179,10 @@ where
                 );
                 return ExitCode::from(2);
             }
-            match crate::pdf_input::convert(
+            match crate::pdf::render(
                 &args.input,
                 &out,
-                &crate::pdf_input::Options {
+                &crate::pdf::Options {
                     width: args.width,
                     strict: args.strict,
                 },
