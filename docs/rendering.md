@@ -8,7 +8,7 @@ This is an early, approximate renderer, not a complete PowerPoint implementation
 
 ## PDF output
 
-`--format pdf` uses the same usvg scene, font faces, and glyph positions as PNG output (`src/pdf.rs`, `src/pdf_output.rs`). No PDF library is used. The backend writes PDF 1.4 with Type 3 outline fonts, ToUnicode maps, and ActualText, so the text is real PDF text rather than a bitmap or an embedded OpenType subset. Font hinting is not preserved, and extraction order, whitespace, and punctuation can differ across readers.
+`--format pdf` uses the same usvg scene, font faces, and glyph positions as PNG output (`src/pdf/writer.rs`, `src/pdf/output.rs`). No PDF library is used. The backend writes PDF 1.4 with Type 3 outline fonts, ToUnicode maps, and ActualText, so the text is real PDF text rather than a bitmap or an embedded OpenType subset. Font hinting is not preserved, and extraction order, whitespace, and punctuation can differ across readers.
 
 Supported as vectors: solid fills and strokes with any opacity (`ExtGState` `/ca` and `/CA`), linear and radial gradients (`ShadingType` 2 and 3 with stitched functions), group opacity, blending, and isolation (transparency-group form XObjects with `/BM`), curves, ordinary caps/joins/dashes, transforms, single-path clipping, outline text with its own fill opacity, and PNG (with an alpha soft mask) and JPEG images. Tables and charts are their rendered paths and text.
 

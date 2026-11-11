@@ -1,6 +1,7 @@
 //! PDF API and no-clobber publication. Keep the PNG report and API unchanged.
+use super::writer;
 use crate::{
-    ConvertOptions, Diagnostic, FontReport, LineHeightReport, pdf, prepare, report_fonts,
+    ConvertOptions, Diagnostic, FontReport, LineHeightReport, prepare, report_fonts,
     report_line_heights,
 };
 use anyhow::{Context, Result, ensure};
@@ -77,7 +78,7 @@ fn convert_inner(
         !deck.slides.is_empty(),
         "PDF requires at least one rendered slide"
     );
-    let mut writer = pdf::Pdf::new();
+    let mut writer = writer::Pdf::new();
     let mut slides = Vec::new();
     for (index, slide) in deck.slides.iter().enumerate() {
         let tree = resvg::usvg::Tree::from_str(&slide.svg, &options)

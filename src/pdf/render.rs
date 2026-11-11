@@ -1,6 +1,5 @@
 //! Experimental, bounded interpretation of a small PDF subset.
-mod render;
-mod syntax;
+use super::{interpreter, reader};
 use anyhow::{Result, ensure};
 use serde::Serialize;
 use std::{fs, io::Read, path::Path};
@@ -39,7 +38,7 @@ fn safe_io<T>(r: std::io::Result<T>) -> Result<T> {
 }
 /// Convert the documented PDF subset into a new directory. Never overwrites.
 /// On handled failure no partial final directory is published.
-pub fn convert(
+pub fn render(
     input: impl AsRef<Path>,
     output: impl AsRef<Path>,
     options: &Options,
@@ -69,8 +68,8 @@ fn convert_staged(
             .read_to_end(&mut data),
     )?;
     ensure!(data.len() <= 32 * 1024 * 1024, "Input byte limit");
-    let doc = syntax::Document::parse(&data)?;
-    let pages = render::pages(&doc)?;
+    let doc = reader::Document::parse(&data)?;
+    let pages = interpreter::pages(&doc)?;
     let parent = output
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
@@ -82,11 +81,11 @@ fn convert_staged(
     )?;
     let result = (|| -> Result<Report> {
         before_write(stage.path())?;
-        let mut renderer = render::Renderer::new(&doc);
+        let mut renderer = interpreter::Renderer::new(&doc);
         let mut report = Report { pages: Vec::new() };
         for (index, page) in pages.iter().enumerate() {
             let object = match page.get("Contents") {
-                Some(syntax::Value::Ref(id)) => *id,
+                Some(reader::Value::Ref(id)) => *id,
                 _ => 0,
             };
             let pix = renderer.page(page, options.width).map_err(|e| {
@@ -164,7 +163,7 @@ mod tests {
     fn image_write_failure_cleans_staged_directory() {
         let dir = tempfile::tempdir().unwrap();
         let input = dir.path().join("input.pdf");
-        let mut pdf = crate::pdf::Pdf::new();
+        let mut pdf = super::super::writer::Pdf::new();
         let tree = resvg::usvg::Tree::from_str(
             r#"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><path d="M0 0H50V50H0Z"/></svg>"#,
             &Default::default(),

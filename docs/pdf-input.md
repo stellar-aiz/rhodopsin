@@ -6,7 +6,7 @@ kind: guide
 
 `rhodopsin input.pdf --out pages --width 1600` writes `page-001.png` etc. and
 `manifest.json`. The `pdf-input` feature is enabled by default. Library callers
-use `rhodopsin::pdf_input::convert` with `pdf_input::Options`. Width is 64–4096.
+use `rhodopsin::pdf::render` with `pdf::Options`. Width is 64–4096.
 Unsupported content fails in normal and strict modes. The destination must not
 exist, even as a dangling symlink. Pages and the manifest are staged beside the
 output and published together using a no-replacement rename. Handled failures
@@ -96,3 +96,7 @@ PDFium: the image region has zero difference, but differs from direct PPTX by
 MAE 0.13046 / changed ratio 0.48333. Input documents, both comparisons and diffs
 are retained; no threshold is relaxed and the PDF writer is unchanged.
 Passing these fixtures does not establish general PDF or Office compatibility.
+
+The original `pdf_input::convert` and its option/report types remain available
+as compatibility re-exports. New code should use `pdf::render`. The existing
+root `convert_pdf` API remains available and is also exposed as `pdf::convert_pdf`.

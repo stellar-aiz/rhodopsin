@@ -13,7 +13,7 @@ PPTX (ZIP/XML)
   -> OOXML parsing, slide order, transforms, text layout   src/pptx.rs, src/pptx/
   -> internal SVG scene                                    resvg / usvg (via resvg) / skrifa
   -> PNG + manifest.json                                   src/lib.rs
-  -> or PDF (Type 3 text, same scene)                      src/pdf.rs, src/pdf_output.rs
+  -> or PDF (Type 3 text, same scene)                      src/pdf/writer.rs, src/pdf/output.rs
 CLI: argument parsing src/main.rs; YAML result documents src/cli_output.rs; .xlsx routing src/cli_xlsx.rs
 ```
 

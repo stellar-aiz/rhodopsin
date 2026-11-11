@@ -1,4 +1,4 @@
-use super::syntax::{Document, Reader, Value};
+use super::reader::{Document, Reader, Value};
 use anyhow::{Result, bail, ensure};
 use base64::Engine;
 use resvg::tiny_skia::{self as sk, Transform};
