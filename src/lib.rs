@@ -9,6 +9,8 @@
 #[cfg(feature = "cli")]
 pub mod cli;
 mod pdf;
+#[cfg(feature = "pdf-input")]
+pub mod pdf_input;
 mod pdf_output;
 mod pptx;
 #[cfg(feature = "xlsx")]

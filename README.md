@@ -68,3 +68,10 @@ for the reasoning.
 [Development and provenance](docs/development.md) ·
 [Design charter](docs/constitution.md) ·
 [Decision records](docs/history/)
+
+### Experimental PDF input
+
+Convert the supported basic PDF subset to PNG with
+`rhodopsin input.pdf --out pages --width 1600`. The implementation is pure Rust
+and rejects unsupported content explicitly. See [PDF input](docs/pdf-input.md)
+for the supported subset, limits, API, and known image-interpolation differences.
