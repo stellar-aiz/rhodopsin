@@ -117,8 +117,15 @@ jobs:
           test "${#zips[@]}" -eq 3
           sha256sum "${zips[@]}" > SHA256SUMS
           cat > notes.md <<NOTES
-          Development build of rhodopsin $VERSION (pre-release). PPTX conversion works with the
-          limitations in docs/rendering.md; XLSX input always stops with a diagnostic.
+          Development build of rhodopsin $VERSION (pre-release).
+
+          Supports PPTX to PNG/PDF, an experimental basic PDF-to-PNG subset, and
+          the documented XLSX-to-PDF subset. Unsupported content is reported;
+          general PDF and Office compatibility are not claimed.
+          See docs/rendering.md, docs/pdf-input.md, and docs/xlsx.md for limits.
+
+          PDF rendering is implemented in Rust and exposed as pdf::render.
+          PDFium is a development-only comparison reference, not a runtime dependency.
 
           Each ZIP is the output of tools/distribution-bundle.py: the executable,
           LICENSE, NOTICE.txt, licenses/, sbom.cdx.json, and manifest.json (status: development).

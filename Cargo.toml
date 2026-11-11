@@ -1,8 +1,8 @@
 [package]
 name = "rhodopsin"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2024"
-description = "CLI and Rust library for converting PPTX to PNG or PDF, and XLSX to PDF, without Office (early implementation)"
+description = "CLI and Rust library for converting PPTX to PNG or PDF, PDF to PNG, and XLSX to PDF, without Office (early implementation)"
 license = "MIT"
 repository = "https://github.com/stellar-aiz/rhodopsin"
 
