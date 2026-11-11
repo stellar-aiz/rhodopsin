@@ -15,7 +15,7 @@ publication behavior is unchanged. Filesystems must support exclusive rename.
 
 This is an independently implemented Rust PDF syntax reader and interpreter.
 It uses the existing resvg/tiny-skia drawing facilities, miniz_oxide, png,
-tempfile and rustix; no native PDF engine or runtime child process is added.
+tempfile, rustix and Windows-only windows-sys OS bindings; no native PDF engine or runtime child process is added.
 No new dependency versions or third-party source/assets are introduced.
 Existing dependency licenses and NOTICE attributions continue to apply.
 

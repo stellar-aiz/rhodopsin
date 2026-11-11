@@ -134,7 +134,27 @@ fn publish(stage: &Path, out: &Path) -> Result<()> {
 }
 #[cfg(windows)]
 fn publish(stage: &Path, out: &Path) -> Result<()> {
-    safe_io(fs::rename(stage, out))
+    use std::os::windows::ffi::OsStrExt;
+    fn wide(path: &Path) -> Result<Vec<u16>> {
+        let mut value: Vec<u16> = path.as_os_str().encode_wide().collect();
+        ensure!(!value.contains(&0), "Invalid output path");
+        value.push(0);
+        Ok(value)
+    }
+    let source = wide(stage)?;
+    let destination = wide(out)?;
+    // SAFETY: Both buffers are NUL-terminated and remain alive for the call.
+    // Flags are zero: unlike std::fs::rename, existing destinations cannot be
+    // replaced. Do not emulate this with a racy existence check before rename.
+    let moved = unsafe {
+        windows_sys::Win32::Storage::FileSystem::MoveFileExW(
+            source.as_ptr(),
+            destination.as_ptr(),
+            0,
+        )
+    };
+    ensure!(moved != 0, "Cannot publish PDF output without replacement");
+    Ok(())
 }
 
 #[cfg(test)]

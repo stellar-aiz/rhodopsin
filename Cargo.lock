@@ -933,6 +933,7 @@ dependencies = [
  "unicode-linebreak",
  "unicode-normalization",
  "unicode-script",
+ "windows-sys",
  "zip",
  "zune-jpeg",
 ]
